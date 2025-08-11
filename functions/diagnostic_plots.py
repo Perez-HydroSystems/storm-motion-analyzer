@@ -99,12 +99,12 @@ def plot_storm_time_steps(storm_tracking_results, storm_name, start_end, time_wi
     morph_radius = event_dict['morph_radius']
     high_threshold = event_dict['high_threshold']
     # Add a text box with parameters for the subplots
-    fig.text(0.5, 0.1, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h, -Time window:{time_window}", 
+    fig.text(0.5, 0.8, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h, -Time window:{time_window}", 
          fontsize=13, color='black', ha='center', va='center', 
          bbox=dict(facecolor='white', edgecolor='black'))
     # Adjust layout and save the figure
-    plt.tight_layout()
-    fig.subplots_adjust(top=0.1) # Adjust top to make room for the title
+    #plt.tight_layout()
+    fig.subplots_adjust(top=0.8) # Adjust top to make room for the title
     # Save the figure
     if save_path is None:
         # don't save if no path is provided
@@ -186,12 +186,13 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     ]
 
     # Add the legend to ax1
-    ax1.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(0.5, 1.15), fontsize=10)
+    ax1.legend(handles=legend_elements, loc='upper right', 
+               bbox_to_anchor=(0.2, 0.5), bbox_transform=ax1.figure.transFigure,fontsize=10)
     new_labels = ["E", "N-E", "N", "N-W", "W", "S-W", "S", "S-E"]
 
     
     # Create a smaller subplot for the wind rose plot
-    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.55, 0.1, 0.3, 0.25], theta_labels=new_labels)
+    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.55, 0.2, 0.3, 0.25], theta_labels=new_labels)
     st_dir_vector = np.asarray(storm_mean_direction_vector) + 90
     bins = np.arange(0, np.max(storm_mean_velocity), 5)
     ax2.bar(st_dir_vector, storm_mean_velocity, normed=True, bins=bins, cmap=plt.get_cmap("cool"))
@@ -229,13 +230,13 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     mean_speed_text = f"Mean Speed: {mean_vel:.2f} m/s"
     mean_precipitation_within_ellipse_text = f"Mean Intensity: {mean_p_ellipse.mean():.2f} mm/h"
 
-    fig.text(0.3, 0.7, f"{mean_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
+    fig.text(0.2, 0.3, f"{mean_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
              fontsize=12, color='black', ha='center', va='center', 
              bbox=dict(facecolor='white', edgecolor='black'))
 
     # Show plot
     plt.show()
-    plt.savefig(save_path+'/storm_trajectories_diagnostic_plot.png', dpi=300, bbox_inches='tight')
+    fig.savefig(save_path+'/storm_trajectories_diagnostic_plot.png', dpi=300, bbox_inches='tight')
 
 
 
