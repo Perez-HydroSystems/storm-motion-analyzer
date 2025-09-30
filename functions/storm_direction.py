@@ -31,6 +31,44 @@ def mean_direction(x, y):
     
     return mean_angle, angle_variance
 
+def mean_direction_weighted(x, y):
+    """
+    Weighted mean direction of successive vectors defined by points (x[i], y[i]) -> (x[i+1], y[i+1]).
+    Weights are the segment lengths. Returns (mean_angle_deg, Rw, angle_variance).
+
+    Rw in [0,1] is the (weighted) mean resultant length; angle_variance = 1 - Rw.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size < 2:
+        return np.nan, np.nan, np.nan
+
+    dx = np.diff(x)
+    dy = np.diff(y)
+
+    # segment directions (radians) and lengths (weights)
+    theta = np.arctan2(dy, dx)                  # shape (n-1,)
+    w = np.hypot(dx, dy)                        # segment lengths
+
+    # guard against zero-length segments
+    mask = w > 0
+    if not np.any(mask):
+        return np.nan, np.nan, np.nan
+    theta = theta[mask]
+    w = w[mask]
+
+    # weighted circular mean
+    S = np.sum(w * np.sin(theta))
+    C = np.sum(w * np.cos(theta))
+    mean_angle_rad = np.arctan2(S, C)
+    mean_angle_deg = np.degrees(mean_angle_rad)
+
+    # weighted mean resultant length
+    Rw = np.hypot(C, S) / np.sum(w)
+    angle_variance = 1 - Rw
+
+    return mean_angle_deg, angle_variance
+
 def mean_velocity(x, y):
     velocities = [] 
     for i in range(len(x) - 1):
@@ -87,6 +125,8 @@ def mean_precipitation_within_ellipse(event_dict):
     """
 
     selected_storm = event_dict['selected_storm']
+    # mask -9999 as nan
+    selected_storm = np.where(selected_storm == -9999, np.nan, selected_storm)
     lon_prj_array = event_dict['lon_prj_array']
     lat_prj_array = event_dict['lat_prj_array']
     

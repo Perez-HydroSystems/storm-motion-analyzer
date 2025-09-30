@@ -50,8 +50,9 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
     else:
         # if the selected storm after post-processing is less than 1/4 of the nominated duration (e.g., 72-hour)
         # we think it is too short and should be removed from the dataset
+    
         print("The selected duration is shorted than {0} of {1} hours, skip this event".format(duration_ratio, storm_duration))
-
+    
     # retrieve the latitude and longitude array
     lat_vector = storm_catalog_latitude[:].data
     lon_vector = storm_catalog_longitude[:].data
@@ -72,6 +73,7 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
     storm_dict['storm_duration'] = storm_duration
     storm_dict['morph_radius'] = morph_radius
     storm_dict['high_threshold'] = high_threshold
+    storm_dict['longest_duration'] = longest_duration
 
     return storm_dict
 
@@ -109,11 +111,12 @@ def continuos_storm(storm_dict):
     # This is because we may select additional time steps where the storm area is lower than the threshold, while it should
     # be kept to maintain the continous time steps
     storm_dict['selected_storm'] = selected_storm_prcp_array
-    storm_dict['selected_storm_area_list'] = selected_storm_prcp_array
+    storm_dict['selected_storm_area'] = selected_storm_area_list
+    storm_dict['selected_storm_duration'] = selected_storm_duration
     storm_dict['selected_storm_time_steps'] = selected_storm_time_steps  
     return storm_dict
 
-def storm_tracking_features(storm_dict):    
+def storm_tracking_features(storm_dict, ellipse_fit = "contour"):    
     # initialize the list to save storm bearing (degree)
     bearing_list = []
 
@@ -157,12 +160,16 @@ def storm_tracking_features(storm_dict):
         precipitation_threshold = np.quantile(curr_prcp_array[curr_prcp_array!=0].flatten(), q = 0.5)
         
         # get the ellipse parameter
-        try:
-            ellipse_dict = storm_catalog_functions.fit_ellipse_by_contour(curr_prcp_array, storm_dict['lon_prj_array'], storm_dict['lat_prj_array'], precipitation_threshold)
-        except:
-            # reduce the threshold level by half
-            precipitation_threshold = precipitation_threshold/2
-            ellipse_dict = storm_catalog_functions.fit_ellipse_by_contour(curr_prcp_array, storm_dict['lon_prj_array'], storm_dict['lat_prj_array'], precipitation_threshold)
+        if ellipse_fit != "contour":
+            ellipse_dict = storm_catalog_functions.fit_ellipse_to_rainfall(curr_prcp_array, storm_dict['lon_prj_array'], storm_dict['lat_prj_array'], precipitation_threshold)
+        else:
+            # fit the ellipse by contour, if it fails, reduce the threshold level by half
+            try:
+                ellipse_dict = storm_catalog_functions.fit_ellipse_by_contour(curr_prcp_array, storm_dict['lon_prj_array'], storm_dict['lat_prj_array'], precipitation_threshold)
+            except:
+                # reduce the threshold level by half
+                precipitation_threshold = precipitation_threshold/2
+                ellipse_dict = storm_catalog_functions.fit_ellipse_by_contour(curr_prcp_array, storm_dict['lon_prj_array'], storm_dict['lat_prj_array'], precipitation_threshold)
         
         # append the variables of storm centroid
         storm_lon_cent_list.append(storm_lon_cent)

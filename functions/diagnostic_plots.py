@@ -13,7 +13,8 @@ from matplotlib.cm import ScalarMappable
 from skimage import measure
 import seaborn as sns
 from windrose import WindroseAxes
-
+from scipy.interpolate import splprep, splev
+import matplotlib.gridspec as gridspec
 
 
 ### Plot storm time steps for a given time window and storm event
@@ -93,13 +94,13 @@ def plot_storm_time_steps(storm_tracking_results, storm_name, start_end, time_wi
     cb_min = 0.2
     n_storm = int(storm_name.split('_storm_')[1].split('_')[0])
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(vmin=cb_min, vmax=cb_max), cmap='Blues'), 
-                        ax=axes, orientation='horizontal', fraction=0.02, pad=0.04)
+                        ax=axes, orientation='horizontal', fraction=0.02, pad=0.1)
     plt.suptitle(f'Storm No. {n_storm}', fontsize=14)
     cbar.set_label('Rainfall (mm/h)', fontsize=12)
     morph_radius = event_dict['morph_radius']
     high_threshold = event_dict['high_threshold']
     # Add a text box with parameters for the subplots
-    fig.text(0.5, 0.8, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h, -Time window:{time_window}", 
+    fig.text(0.5, 0.86, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h, -Time window:{time_window}", 
          fontsize=13, color='black', ha='center', va='center', 
          bbox=dict(facecolor='white', edgecolor='black'))
     # Adjust layout and save the figure
@@ -110,14 +111,15 @@ def plot_storm_time_steps(storm_tracking_results, storm_name, start_end, time_wi
         # don't save if no path is provided
         plt.show()
     else:
-        plt.savefig(save_path + f'/storm_track_{n_storm}.png', dpi=300, bbox_inches='tight')
+        plt.savefig(save_path + f'/storm_step_{n_storm}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)  # Close the figure to avoid displaying it in Jupyter Notebook
 
 
 ### diagnostic plot for storm trajectories
 
 def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_trajectories, wsh, transposition_domain, 
                                        storm_mean_direction_vector, storm_mean_velocity, mean_angle, mean_vel, 
-                                       mean_p_ellipse, time_window,save_path):
+                                       mean_p_ellipse, time_window, save_path, fig_name=None):
     """
     Generates diagnostic plots for storm trajectories and wind rose.
 
@@ -134,15 +136,17 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     - mean_p_ellipse (array): Mean precipitation within the ellipse.
     - time_window (str): Time window for storm duration.
     """
-    fig = plt.figure(figsize=(12, 8))
-
+    fig = plt.figure(figsize=(14, 8))
+    gs = gridspec.GridSpec(3, 2, width_ratios=[1, 1], wspace=0.8, figure=fig)
     # Create a larger subplot for ax1
     ax1 = fig.add_subplot(121, projection=ccrs.PlateCarree())
+    # ax1.set_aspect('equal')
+    ax1.set_position([0.05, 0.15, 0.7, 0.5]) 
     ax1.set_title(f'Storm Trajectories (Storm duration: {time_window})\n Storm events: 400', fontsize=16)
 
     # Plot basin, transposed basin, and transposition domain
     wsh.plot(ax=ax1, facecolor='none', edgecolor='red', linewidth=1.5, label="Control Area", zorder=2)
-    transposition_domain.plot(ax=ax1, facecolor='none', linestyle='--', edgecolor='black', linewidth=1.5, label="Transposition Domain")
+    transposition_domain.plot(ax=ax1, facecolor='none', linestyle='--', edgecolor='green', linewidth=1.5, label="Transposition Domain")
 
     # Add grid with labeled coordinates
     gl1 = ax1.gridlines(draw_labels=True, linestyle='--')
@@ -152,10 +156,13 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     gl1.ylabel_style = {'size': 10}  # Set font size for y-axis labels
 
     # Add U.S. state boundaries
-    ax1.add_feature(cfeature.STATES, edgecolor='black', linewidth=1)
+    ax1.add_feature(cfeature.STATES, edgecolor='grey', linewidth=1)
 
     max_precip = df.loc[longest_trajectories.keys(), 'mean_precipitation'].max()
     min_precip = df.loc[longest_trajectories.keys(), 'mean_precipitation'].min()
+
+    
+      # skip negative precipitation values
 
     # Create a colormap for the trajectories
     norm = Normalize(vmin=min_precip, vmax=max_precip)
@@ -168,9 +175,22 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
         y_coords = traj['lat_coords']
         color_value = df.loc[storm_event, 'mean_precipitation']  # Use trajectory length for color mapping
         color = cmap(norm(color_value))  # Normalize and map to color
-        # Plot the trajectory with the corresponding color
-        ax1.plot(x_coords, y_coords, color=color, label=storm_event[-20:-12], zorder=1) 
+        unique_points = np.unique(np.array([x_coords, y_coords]), axis=1)
+        # Use splines to smooth the trajectory
+        if len(x_coords) > 3:  # Ensure there are enough points for spline fitting
+            tck, u = splprep(unique_points, s=0.1)
+            smooth_coords = splev(np.linspace(0, 1, 100), tck)
+            ax1.plot(smooth_coords[0], smooth_coords[1], color=color, label=storm_event[-20:-12], zorder=1)
+        else:
+            # If not enough points, plot as is
+            ax1.plot(x_coords, y_coords, color=color, label=storm_event[-20:-12], zorder=1)
 
+    # Set extent to 0.5 degrees around the transposition domain
+    tp_bounds = transposition_domain.total_bounds  # [minx, miny, maxx, maxy]
+    lon_min, lat_min, lon_max, lat_max = tp_bounds
+    buffer = 0.1
+    ax1.set_extent([lon_min - buffer, lon_max + buffer, lat_min - buffer, lat_max + buffer], crs=ccrs.PlateCarree())
+    
     # Create a ScalarMappable for the colorbar
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])  # Set an empty array to avoid warnings
@@ -181,22 +201,24 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     # Create a legend using custom handles
     legend_elements = [
         Line2D([0], [0], color='red', lw=2, label="Area of interest"),
-        Line2D([0], [0], color='black', lw=2, linestyle='--', label="Transposition Domain"),
+        Line2D([0], [0], color='green', lw=2, linestyle='--', label="Transposition Domain"),
         Line2D([0], [0], color='lightblue', lw=2, label="Storm Trajectories"),
     ]
 
     # Add the legend to ax1
     ax1.legend(handles=legend_elements, loc='upper right', 
-               bbox_to_anchor=(0.2, 0.5), bbox_transform=ax1.figure.transFigure,fontsize=10)
+               bbox_transform=ax1.figure.transFigure,fontsize=10)
+    
+    # Labels for rose plots
     new_labels = ["E", "N-E", "N", "N-W", "W", "S-W", "S", "S-E"]
 
     
     # Create a smaller subplot for the wind rose plot
-    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.55, 0.2, 0.3, 0.25], theta_labels=new_labels)
-    st_dir_vector = np.asarray(storm_mean_direction_vector) + 90
+    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.55, 0.56, 0.20, 0.25], theta_labels=new_labels)
+    st_dir_vector = (np.asarray(storm_mean_direction_vector) + 90) % 360 # Convert to meteorological convention
     bins = np.arange(0, np.max(storm_mean_velocity), 5)
     ax2.bar(st_dir_vector, storm_mean_velocity, normed=True, bins=bins, cmap=plt.get_cmap("cool"))
-    ax2.set_legend(title='Storm Speed (m/s)', loc='lower right', bbox_to_anchor=(2.1, 0.2))
+    ax2.set_legend(title='Storm Speed (m/s)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
     # Hide default radial tick labels
     ax2.set_yticklabels([])
 
@@ -208,13 +230,12 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
         ax2.text(np.pi/2, r, f"{r:.0f}%", ha='left', va='bottom', fontsize=9)
 
     # Create a smaller subplot using the mean precipitation within the ellipse
-    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.55, 0.5, 0.3, 0.25], theta_labels=new_labels)
-    st_dir_vector = np.asarray(storm_mean_direction_vector) + 90
-    bins = np.arange(0, np.max(df['mean_precipitation']), 5)
+    ax2 = WindroseAxes.from_ax(fig=fig, rect=[0.75, 0.56, 0.20, 0.25], theta_labels=new_labels)
+    st_dir_vector = (np.asarray(storm_mean_direction_vector) + 90) % 360
+    bins = np.linspace(0, df['mean_precipitation'].max(), 5)
     ax2.bar(st_dir_vector, df['mean_precipitation'], normed=True, bins=bins, cmap=plt.get_cmap("jet"))
-    ax2.set_legend(title='Intensity (mm/h)', loc='lower right', bbox_to_anchor=(2.1, 0.2))
+    ax2.set_legend(title='Intensity (mm/h)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
     ax2.legend_.get_title().set_horizontalalignment('center')
-    ax2.set_title('Storm Direction', fontsize=10)
     # Hide default radial tick labels
     ax2.set_yticklabels([])
 
@@ -226,17 +247,40 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
         ax2.text(np.pi/2, r, f"{r:.0f}%", ha='left', va='bottom', fontsize=9)
         
     # Add a text box above the trajectories
-    mean_direction_text = f"Mean Direction: {mean_angle:.2f}°"
-    mean_speed_text = f"Mean Speed: {mean_vel:.2f} m/s"
-    mean_precipitation_within_ellipse_text = f"Mean Intensity: {mean_p_ellipse.mean():.2f} mm/h"
+    mean_direction_text = f"Mean Storm Direction: {mean_angle:.2f}°"
+    mean_speed_text = f"Mean Storm Speed: {mean_vel:.2f} m/s"
+    mean_precipitation_within_ellipse_text = f"Mean Storm Intensity: {mean_p_ellipse.mean():.2f} mm/h"
 
-    fig.text(0.2, 0.3, f"{mean_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
+    # Position the text box above  rose plots
+    x_pos = 0.75  # Centered above the two rose plots
+    y_pos = 0.9  # Slightly above the rose plots
+
+    fig.text(x_pos, y_pos, f"{mean_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
              fontsize=12, color='black', ha='center', va='center', 
              bbox=dict(facecolor='white', edgecolor='black'))
 
+    # add a location plot for the transposition domain
+    # Right subplot (1/3 width)
+    ax4 = fig.add_subplot(gs[2, 1], projection=ccrs.PlateCarree())
+    ax4.set_title('Transposition Domain Location', fontsize=12)
+    # Set extent to show the contiguous United States
+    ax4.set_extent([-125.5, -66.5, 24, 50], crs=ccrs.PlateCarree())
+    # Plot the transposition domain
+    transposition_domain.plot(ax=ax4, facecolor='none', edgecolor='green', linewidth=2, label="Transposition Domain")
+    # Add grid with labeled coordinates
+    gl4 = ax4.gridlines(draw_labels=True, linestyle='--')
+    gl4.top_labels = False
+    gl4.right_labels = False
+    gl4.xlabel_style = {'size': 10}  # Set font size for x-axis labels
+    gl4.ylabel_style = {'size': 10}  # Set font size for y-axis labels
+    # Add U.S. state boundaries
+    ax4.add_feature(cfeature.STATES, edgecolor='lightgray', linewidth=0.5)
+    
+
+
     # Show plot
     plt.show()
-    fig.savefig(save_path+'/storm_trajectories_diagnostic_plot.png', dpi=300, bbox_inches='tight')
+    fig.savefig(save_path+f'/storm_trajectories_diagnostic_plot_{fig_name}.png', dpi=300, bbox_inches='tight')
 
 
 
@@ -264,15 +308,15 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     cb_min = 0.2
 
     # Create the figure and axes
-    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(14, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(14, 8), subplot_kw={'projection': ccrs.PlateCarree()}, gridspec_kw={'width_ratios': [1, 1]})
+    
     # First plot: Precipitation and storm centroid
     rain = ax[0].pcolormesh(
         event_dict['lon_array'], event_dict['lat_array'], 
         np.ma.masked_where(acum_prcp < 0.2, acum_prcp),
         cmap='Blues', vmax=cb_max, vmin=cb_min
     )
-    cbar = plt.colorbar(rain, ax=ax[0], label='Rainfall (mm)', orientation='vertical', fraction=0.03, pad=0.04)
+    cbar = plt.colorbar(rain, ax=ax[0], label='Rainfall (mm)', orientation='vertical', fraction=0.03, pad=0.1)
 
     # Plot the storm centroid trajectory
     ax[0].plot(
@@ -357,7 +401,7 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     ax[1].add_patch(bounding_box)
 
     # Calculate the mean direction vector
-    mean_track_direction = storm_tracking_results[storm_name]['mean_direction']
+    mean_track_direction = storm_tracking_results[storm_name]['mean_direction_weighted']
     # Calculate the mean speed
     mean_speed = storm_tracking_results[storm_name]['mean_velocity']
     # Create text for mean direction and speed  
@@ -378,17 +422,34 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     y = np.array(event_dict['storm_lat_cent'][start_time_index:end_time_index])
     # Calculate the mean coordinates of the storm centroid trajectory
     xa, ya = x.mean(), y.mean()
-
+     # direction (degrees -> radians), unit vector
+    theta = np.radians(mean_track_direction)
+    cx, sy = np.cos(theta), np.sin(theta)
     # ─── bounding‐box vector ───
     dx = x.max() - x.min()
     dy = y.max() - y.min()
-    length = np.hypot(dx, dy)
 
+
+    # compute max half-length that stays inside box for pivot='middle'
+    def bound_along(dir_comp, low, mid, high):
+        # distance to the nearer boundary in + and - direction for one axis
+        if dir_comp == 0:
+            return np.inf
+        pos = (high - mid) / abs(dir_comp)  # forward
+        neg = (mid - low)  / abs(dir_comp)  # backward
+        return min(pos, neg)
+
+    tx = bound_along(cx, x.min(), xa, x.max())
+    ty = bound_along(sy, y.min(), ya, y.max())
+    half_len = min(tx, ty)
+        
+   
+
+    # build vector components; quiver length is full magnitude when pivot='middle'
+    u = cx * (2 * half_len)
+    v = sy * (2 * half_len)
     ax[1].quiver(
-        xa, 
-        ya, 
-        np.cos(np.radians(mean_track_direction)), 
-        np.sin(np.radians(mean_track_direction)), 
+        xa,  ya, u, v, 
         angles='xy', scale_units='xy', pivot='middle', scale=1, color='blue', label='Mean Direction'
     )
 
@@ -416,7 +477,7 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     ax[1].legend()
 
     # Add a text box with parameters for the subplots
-    fig.text(0.25, 0.83, f"{mean_direction_text}\n{var_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
+    fig.text(0.25, 0.92, f"{mean_direction_text}\n{var_direction_text}\n{mean_speed_text}\n{mean_precipitation_within_ellipse_text}", 
              fontsize=13, color='black', ha='center', va='center', 
              bbox=dict(facecolor='white', edgecolor='black'))
     
@@ -424,7 +485,7 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     # Add a text box with parameters for the subplots
     morph_radius = event_dict['morph_radius']
     high_threshold = event_dict['high_threshold']
-    fig.text(0.2, 0.2, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h", 
+    fig.text(0.25, 0.1, f"Parameters: -Morph radius: {morph_radius}, -High treshold:{high_threshold} mm/h", 
          fontsize=13, color='black', ha='center', va='center', 
          bbox=dict(facecolor='white', edgecolor='black'))
 
@@ -432,12 +493,18 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     plt.tight_layout()
     fig.subplots_adjust(top=0.92)
     fig.suptitle(f'Storm Event {n_storm} Overview', fontsize=16)
+
     # Save the figure
     if save_path is None:
         # don't save if no path is provided
         plt.show()
     else:
         plt.savefig(save_path + f'/storm_track_{n_storm}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)  # Close the figure to avoid displaying it in Jupyter Notebook
+
+
+
+
 
 
 

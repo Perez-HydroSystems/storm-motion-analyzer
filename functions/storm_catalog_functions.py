@@ -175,3 +175,78 @@ def fit_ellipse_by_contour(curr_prcp_array, lon_prj_array, lat_prj_array, thresh
     ellipse_dict['cent_prj_lat'] = ellipse_cent_prj_lat
 
     return ellipse_dict
+
+def fit_ellipse_to_rainfall(rainfall_field, x_coords, y_coords, threshold=1.0):
+    """
+    Fits an ellipse to a 2D rainfall field using the method of moments.
+
+    Args:
+        rainfall_field (np.ndarray): A 2D NumPy array where each value is the
+                                    rainfall intensity.
+        threshold (float): The minimum rainfall intensity to consider.
+                           Values below this will be set to zero.
+
+    Returns:
+        dict: A dictionary containing the ellipse parameters:
+              'center' (tuple), 'major_axis' (float), 'minor_axis' (float),
+              'angle_deg' (float). Returns None if no data is above the threshold.
+    """
+    # Ensure input is a numpy array
+    field = np.array(rainfall_field)
+    
+    # Apply threshold
+    field_thresholded = np.where(field >= threshold, field, 0)
+
+    
+
+    # Calculate zeroth moment (total intensity)
+    m00 = np.sum(field_thresholded)
+
+    # Check if there is any rainfall above the threshold
+    if m00 == 0:
+        return None
+
+    # First moments (to find the centroid)
+    m10 = np.sum(x_coords * field_thresholded)
+    m01 = np.sum(y_coords * field_thresholded)
+
+    # --- Step 2: Calculate Ellipse Center (Centroid) ---
+    x_bar = m10 / m00
+    y_bar = m01 / m00
+
+    # Second central moments (to find size and orientation)
+    mu20 = np.sum((x_coords - x_bar)**2 * field) / m00
+    mu02 = np.sum((y_coords - y_bar)**2 * field) / m00
+    mu11 = np.sum((x_coords - x_bar) * (y_coords - y_bar) * field) / m00
+
+    # --- Step 3: Calculate Ellipse Axes and Angle ---
+    # Common term
+    common_term = np.sqrt((mu20 - mu02)**2 + 4 * mu11**2)
+
+    # Major and minor axes (proportional to standard deviations)
+    # The factor 2*sqrt(2) scales the ellipse to contain ~86.5% of the total intensity
+    # under a Gaussian assumption, a common convention.
+    major_axis = 2 * np.sqrt(2) * np.sqrt(0.5 * ((mu20 + mu02) + common_term))
+    minor_axis = 2 * np.sqrt(2) * np.sqrt(0.5 * ((mu20 + mu02) - common_term))
+
+    # Orientation angle
+    angle_rad = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+    angle_deg = np.degrees(angle_rad)
+
+     # create a dictionary to save ellipse data
+    ellipse_dict = {}
+    ellipse_dict['major_axis_length'] = major_axis
+    ellipse_dict['minor_axis_length'] = minor_axis
+    ellipse_dict['matplotlib_width'] = major_axis
+    ellipse_dict['matplotlib_height'] = minor_axis
+    ellipse_dict['angle'] = angle_deg
+    ellipse_dict['cent_prj_lon'] = x_bar
+    ellipse_dict['cent_prj_lat'] = y_bar
+    return ellipse_dict
+        
+
+    
+
+
+
+
