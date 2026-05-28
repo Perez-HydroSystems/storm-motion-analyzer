@@ -64,10 +64,53 @@ def mean_direction_weighted(x, y):
     mean_angle_deg = np.degrees(mean_angle_rad)
 
     # weighted mean resultant length
-    Rw = np.hypot(C, S) / np.sum(w)
+    r = np.hypot(C, S)
+    Rw = r / np.sum(w)
     angle_variance = 1 - Rw
 
     return mean_angle_deg, angle_variance
+
+def percentile_direction(angles_deg, percentiles, wrap_to_360=True):
+    """
+    Compute percentiles for direction values in degrees using circular wrapping.
+
+    Parameters:
+    - angles_deg (array-like): Direction values in degrees.
+    - percentiles (float or array-like): Percentiles in the range [0, 100].
+    - wrap_to_360 (bool): If True, return results in [0, 360). If False, return
+      results in [-180, 180).
+
+    Returns:
+    - float or numpy.ndarray: Circular percentiles of the input angles.
+    """
+
+    angles = np.asarray(angles_deg, dtype=float)
+    angles = angles[np.isfinite(angles)]
+
+    if angles.size == 0:
+        raise ValueError("angles_deg must contain at least one finite value")
+
+    percentiles = np.asarray(percentiles, dtype=float)
+    if np.any((percentiles < 0) | (percentiles > 100)):
+        raise ValueError("percentiles must be within [0, 100]")
+
+    # Map angles to [0, 360) and choose a circular reference close to the data.
+    wrapped = np.mod(angles, 360.0)
+    circular_mean = np.degrees(np.angle(np.mean(np.exp(1j * np.radians(wrapped)))))
+
+    # Shift the data so the percentile calculation is continuous around the mean.
+    shifted = (wrapped - circular_mean + 180.0) % 360.0 - 180.0
+    pct_shifted = np.percentile(shifted, percentiles)
+    result = pct_shifted + circular_mean
+
+    if wrap_to_360:
+        result = np.mod(result, 360.0)
+    else:
+        result = (result + 180.0) % 360.0 - 180.0
+
+    if result.ndim == 0:
+        return float(result)
+    return result
 
 def mean_velocity(x, y):
     velocities = [] 
