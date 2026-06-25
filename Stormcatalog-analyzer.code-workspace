@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "Stormcatalog-analyzer",
+			"path": "."
+		},
+		{
+			"name": "Paper_Notebooks",
+			"path": "../Paper_Notebooks"
+		}
+	],
+	"settings": {}
+}
