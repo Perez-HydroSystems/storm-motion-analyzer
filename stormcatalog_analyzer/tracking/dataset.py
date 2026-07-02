@@ -6,9 +6,9 @@ from pyproj import Transformer
 from geographiclib.geodesic import Geodesic
 
 # import storm tracking and identification functions
-import functions.storm_identification as storm_identification
-import functions.storm_tracking as storm_tracking
-import functions.storm_catalog_functions as storm_catalog_functions
+from . import identification as storm_identification
+from . import tracking as storm_tracking
+from . import catalog as storm_catalog_functions
 
 def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_threshold = 0.2, var_name = 'rain'):
 

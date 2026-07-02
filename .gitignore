@@ -1,0 +1,25 @@
+# Test data / large catalogs (provide your own; see configs/)
+testing_data/
+
+# Generated outputs
+frames/
+*_temp.ipynb
+executed_notebook_temp.ipynb
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Environments
+.venv/
+venv/
+.env

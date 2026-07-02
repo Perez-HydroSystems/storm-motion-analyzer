@@ -1,0 +1,37 @@
+{
+  "project_root": ".",
+  "io": {
+    "catalog_dir": "testing_data/StormCatalog",
+    "transposition_domain_path": "testing_data/TranspositionDomain/Domain_22.shp",
+    "control_area_path": null,
+    "grid_path": null,
+    "output_dir": "testing_data",
+    "domain_name": "Test Domain",
+    "max_events": null
+  },
+  "tracking": {
+    "var_name": "rain",
+    "morph_radius": 2,
+    "high_threshold": 0.5,
+    "ellipse_fit": "moments",
+    "ratio_threshold": 0.2,
+    "dry_spell_time": 0
+  },
+  "selection": {
+    "min_duration_steps": 6,
+    "area_portion_threshold": 0.05
+  },
+  "motion": {
+    "storm_interval": "12H",
+    "top_n_trajectories": 100
+  },
+  "figure": {
+    "font_size": 0,
+    "dpi": 300,
+    "smooth_factor": 0.05,
+    "arrow_scale": 1.0,
+    "arrow_width": 0.005,
+    "head_width": 2.0,
+    "head_length": 1.5
+  }
+}

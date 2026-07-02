@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stormcatalog-analyzer"
+version = "0.1.0"
+description = "Detect, track and characterize storm motion from RainyDay storm catalogs."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Diego F. Osorio-Giraldo" },
+  { name = "Gabriel Perez" },
+]
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "xarray",
+  "netCDF4",
+  "scikit-image",
+  "opencv-python",
+  "pyproj",
+  "geographiclib",
+  "mpu",
+  "geopandas",
+  "shapely",
+  "cartopy",
+  "matplotlib",
+  "seaborn",
+  "windrose",
+  "imageio",
+]
+
+[project.scripts]
+stormcatalog-analyzer = "stormcatalog_analyzer.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["stormcatalog_analyzer*"]

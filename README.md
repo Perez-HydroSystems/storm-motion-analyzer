@@ -85,33 +85,66 @@ The analysis explores:
 
 ```bash
 # Clone the repository
-git clone https://github.com/gjperez/Stormcatalog-analyzer.git
-cd Stormcatalog-analyzer
+git clone https://github.com/Perez-HydroSystems/storm-motion-analyzer.git
+cd storm-motion-analyzer
 
-# Install dependencies
+# Install dependencies (and, optionally, the package + CLI)
 pip install -r requirements.txt
+pip install -e .          # optional: enables the `stormcatalog-analyzer` command
 ```
 
-### Quick Example
+### Quick start
+
+**You provide a storm catalog (a folder of NetCDF events) and a JSON config; the
+tool produces the diagnostic plots.** All inputs, paths, and model parameters live
+in one config file — see [`configs/testing_data.json`](configs/testing_data.json).
+
+**Command line** (headless) — three subcommands:
+
+```bash
+# 1) Catalog-level diagnostic plots (main deliverable)
+python run_diagnostics.py --config configs/testing_data.json
+
+# 2) Per-event tracking figures for a single storm (by filename, substring, or id)
+python run_diagnostics.py event --config configs/testing_data.json --storm 100
+
+# 3) Parameter sensitivity sweep (rainfall threshold / duration / number of events)
+python run_diagnostics.py params --config configs/testing_data.json \
+    --param high_threshold --values 0.2 0.5 1.0 --max-events 60
+```
+
+(If installed: `stormcatalog-analyzer diagnostics|event|params ...`.)
+
+**Notebook:** open [`storm_tracking_results.ipynb`](storm_tracking_results.ipynb) —
+it loads the config and calls the same pipeline.
+
+**Python API:**
 
 ```python
-import stormcatalog_analyzer as sca
+from stormcatalog_analyzer.config import load_config
+from stormcatalog_analyzer import pipeline
 
-# Load storm catalog data from RainyDay output
-# Put code here
-
-# Detect and track storms
-# Put code here
-
-
-# Extract storm characteristics
-# Put code here
-
-
-# Generate diagnostic plots
-# Put code here
-
+cfg = load_config("configs/testing_data.json")
+cfg.tracking.high_threshold = 0.5      # optional inline overrides
+out = pipeline.run(cfg)                # track -> summarize -> diagnostics
+out["summary"].storm_properties.head()
+print(out["figures"])                  # saved figure paths
+print(out["table"])                    # per-storm properties CSV
 ```
+
+Outputs are written to `<output_dir>/<domain_name>/`:
+- **`storm_properties_<domain>.csv`** — one row per storm: mean speed & direction, mean/peak
+  intensity, total accumulated rainfall, ellipse major/minor axis + angle, area, duration, trajectory length.
+- the diagnostic figures (trajectory map + wind rose, direction vectors, statistics pairplot).
+
+### Notebooks
+
+| Notebook | Purpose |
+|----------|---------|
+| [`storm_tracking_results.ipynb`](storm_tracking_results.ipynb) | **Main** — catalog in, full diagnostic-plot set out. |
+| [`notebooks/storm_event_tracking.ipynb`](notebooks/storm_event_tracking.ipynb) | Per-event spatiotemporal evolution + fitted ellipse. |
+| [`notebooks/parameter_analysis.ipynb`](notebooks/parameter_analysis.ipynb) | Sensitivity to rainfall threshold / duration / number of events. |
+| `notebooks/legacy/` | Older exploratory notebooks (unmaintained). |
 
 ## 📈 Output Products
 
