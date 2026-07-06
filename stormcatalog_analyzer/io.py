@@ -59,7 +59,7 @@ def open_event(path: Path, var_name: str = "rain"):
     if var_name not in ds.variables:
         raise KeyError(
             f"Variable {var_name!r} not in {path.name}. "
-            f"Available: {list(ds.data_vars)}. Set tracking.var_name accordingly."
+            f"Available: {list(ds.data_vars)}. Set tracking.rainfall_var_name accordingly."
         )
     return ds
 

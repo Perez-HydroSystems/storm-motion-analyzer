@@ -11,7 +11,6 @@ copy-pasted across the notebooks.
 """
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -57,14 +56,14 @@ def run_catalog_tracking(cfg: Config, verbose: bool = True) -> Dict[str, dict]:
     results: Dict[str, dict] = {}
     for event_path in scio.discover_events(cfg):
         name = event_path.name
-        ds = scio.open_event(event_path, var_name=t.var_name)
+        ds = scio.open_event(event_path, var_name=t.rainfall_var_name)
         try:
             event_dict: dict = {}
             storm_tracking_event(
                 ds, event_dict,
-                morph_radius=t.morph_radius,
-                high_threshold=t.high_threshold,
-                var_name=t.var_name,
+                morph_radius=t.morph_radius_cells,
+                high_threshold=t.rainfall_threshold_mmhr,
+                var_name=t.rainfall_var_name,
             )
             if int(event_dict["longest_duration"]) < cfg.selection.min_duration_steps:
                 if verbose:
@@ -72,7 +71,7 @@ def run_catalog_tracking(cfg: Config, verbose: bool = True) -> Dict[str, dict]:
                           f"< {cfg.selection.min_duration_steps}")
                 continue
             continuos_storm(event_dict)
-            storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit)
+            storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
             results[name] = event_dict
             if verbose:
                 print(f"ok   {name}")
@@ -172,7 +171,7 @@ def compute_storm_trajectory(storm: dict, interval: str, storm_id: int = 0) -> O
 def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
     """Compute per-storm direction/speed/trajectory and catalog-level aggregates."""
     results = {k: v for k, v in results.items() if v}
-    interval = cfg.motion.storm_interval
+    interval = cfg.motion.intensity_window
 
     storm_trajectories: dict = {}
     storm_mean_velocity: list = []
@@ -231,7 +230,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
     longest_trajectories = dict(
         sorted(storm_trajectories.items(),
                key=lambda kv: kv[1]["trajectory_length"], reverse=True)[
-            : cfg.motion.top_n_trajectories]
+            : cfg.motion.n_trajectories_plotted]
     )
 
     wd_arr = np.radians(storm_mean_direction_weighted)
@@ -292,7 +291,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,
         mean_p_ellipse=np.float64(summary.mean_p),
-        time_window=cfg.motion.storm_interval,
+        time_window=cfg.motion.intensity_window,
         grid=grid,
         save_path=save_dir,
         wsh=control_area,
@@ -311,7 +310,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,
         mean_p_ellipse=np.float64(summary.mean_p),
-        time_window=cfg.motion.storm_interval,
+        time_window=cfg.motion.intensity_window,
         grid=grid,
         save_path=save_dir,
         wsh=control_area,
@@ -360,12 +359,12 @@ def track_one_event(cfg: Config, storm: str):
     path = scio.resolve_event(cfg, storm)
     name = path.name
     t = cfg.tracking
-    ds = scio.open_event(path, var_name=t.var_name)
+    ds = scio.open_event(path, var_name=t.rainfall_var_name)
     try:
         event_dict: dict = {}
         storm_tracking_event(
             ds, event_dict,
-            morph_radius=t.morph_radius, high_threshold=t.high_threshold, var_name=t.var_name,
+            morph_radius=t.morph_radius_cells, high_threshold=t.rainfall_threshold_mmhr, var_name=t.rainfall_var_name,
         )
         if int(event_dict["longest_duration"]) < cfg.selection.min_duration_steps:
             raise RuntimeError(
@@ -373,12 +372,12 @@ def track_one_event(cfg: Config, storm: str):
                 f"< min_duration_steps={cfg.selection.min_duration_steps}"
             )
         continuos_storm(event_dict)
-        storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit)
+        storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
     finally:
         ds.close()
 
     traj = compute_storm_trajectory(
-        event_dict, cfg.motion.storm_interval, storm_id=_parse_storm_id(name, 0)
+        event_dict, cfg.motion.intensity_window, storm_id=_parse_storm_id(name, 0)
     )
     if traj is None:
         raise RuntimeError(f"{name}: no valid trajectory (>= 2 centroids)")
@@ -399,7 +398,7 @@ def generate_event_diagnostics(cfg: Config, storm: str, verbose: bool = True) ->
         storm_trajectories=trajectories, save_path=str(paths["storm_track"]),
     )
 
-    interval = cfg.motion.storm_interval
+    interval = cfg.motion.intensity_window
     if interval in _TIME_STEP_WINDOWS:
         st = trajectories[name]["start_time_index"]
         en = trajectories[name]["end_time_index"]
@@ -425,66 +424,50 @@ def generate_event_diagnostics(cfg: Config, storm: str, verbose: bool = True) ->
     return saved
 
 
-# --------------------------------------------------------------------------
-# Phase 3: parameter sensitivity sweep
-# --------------------------------------------------------------------------
-_SWEEP_SETTERS = {
-    "high_threshold": lambda c, v: setattr(c.tracking, "high_threshold", float(v)),
-    "morph_radius": lambda c, v: setattr(c.tracking, "morph_radius", int(v)),
-    "min_duration_steps": lambda c, v: setattr(c.selection, "min_duration_steps", int(v)),
-    "max_events": lambda c, v: setattr(c.io, "max_events", int(v)),
-}
+def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
+                                   summary: "MotionSummary", verbose: bool = True) -> List[Path]:
+    """Render per-event figures (storm track + time-step panels) for EVERY storm.
 
-
-def run_parameter_sweep(cfg: Config, param: str, values, verbose: bool = True) -> pd.DataFrame:
-    """Re-run track+summarize for each value of ``param``; return aggregate stats per value.
-
-    Supported params: ``high_threshold``, ``morph_radius``, ``min_duration_steps``,
-    ``max_events``. Heavy (re-tracks the catalog per value) — use ``io.max_events`` to
-    subsample for quick sensitivity checks.
+    Reuses the already-computed tracking ``results`` and motion ``summary`` from
+    ``run()`` (no re-tracking). Saves to ``<output_dir>/<domain>/StormTrack/`` and
+    ``.../StormTimeSteps/``. Slow for large catalogs (2 figures per storm) — subsample
+    the catalog with ``io.max_events`` if needed.
     """
-    if param not in _SWEEP_SETTERS:
-        raise ValueError(f"param must be one of {sorted(_SWEEP_SETTERS)}")
+    from .plotting.per_event import plot_storm_track, plot_storm_time_steps
 
-    rows = []
-    for val in values:
-        c = copy.deepcopy(cfg)
-        _SWEEP_SETTERS[param](c, val)
-        if verbose:
-            print(f"\n=== {param} = {val} ===")
-        results = run_catalog_tracking(c, verbose=False)
-        try:
-            summary = summarize_motion(results, c)
-        except RuntimeError:
-            rows.append({param: val, "n_storms": 0, "mean_direction_deg": np.nan,
-                         "mean_speed_ms": np.nan, "mean_intensity_mmh": np.nan,
-                         "mean_angular_variance": np.nan})
-            continue
-        row = {
-            param: val,
-            "n_storms": len(summary.storm_trajectories),
-            "mean_direction_deg": summary.mean_angle,
-            "mean_speed_ms": summary.mean_vel,
-            "mean_intensity_mmh": summary.mean_p,
-            "mean_angular_variance": float(np.mean(summary.storm_properties["angular_variance"])),
-        }
-        rows.append(row)
-        if verbose:
-            print(f"  n_storms={row['n_storms']}  dir={row['mean_direction_deg']:.1f} deg  "
-                  f"speed={row['mean_speed_ms']:.2f} m/s")
-    return pd.DataFrame(rows)
-
-
-def generate_parameter_analysis(cfg: Config, param: str, values, verbose: bool = True):
-    """Run a sweep and save a CSV + comparison figure. Returns (DataFrame, [paths])."""
-    from .plotting.diagnostics import plot_parameter_sweep
-
-    sweep = run_parameter_sweep(cfg, param, values, verbose=verbose)
     paths = scio.ensure_output_dirs(cfg)
-    domain = cfg.io.domain_name
-    csv_path = paths["base"] / f"parameter_sweep_{param}_{domain}.csv"
-    sweep.to_csv(csv_path, index=False)
-    fig_path = Path(plot_parameter_sweep(sweep, param, str(paths["base"]), domain, dpi=cfg.figure.dpi))
+    interval = cfg.motion.intensity_window
+    do_steps = interval in _TIME_STEP_WINDOWS
+    if not do_steps and verbose:
+        print(f"note: intensity_window {interval!r} not in {sorted(_TIME_STEP_WINDOWS)}; "
+              "drawing storm-track figures only (no time-step panels)")
+
+    trajectories = summary.storm_trajectories
+    total = len(trajectories)
+    saved: List[Path] = []
+    for k, (name, traj) in enumerate(trajectories.items(), start=1):
+        if name not in results:
+            continue
+        plot_storm_track(
+            storm_tracking_results=results, storm_name=name,
+            storm_trajectories=trajectories, save_path=str(paths["storm_track"]),
+        )
+        if do_steps:
+            plot_storm_time_steps(
+                storm_tracking_results=results, storm_name=name,
+                start_end=(traj["start_time_index"], traj["end_time_index"]),
+                time_window=interval, save_path=str(paths["storm_time_steps"]),
+                font_size=cfg.figure.font_size,
+            )
+        sid = name.split("_storm_")[1].split("_")[0] if "_storm_" in name else str(k)
+        for pth in (paths["storm_track"] / f"storm_track_{sid}.png",
+                    paths["storm_time_steps"] / f"storm_step_{sid}.png"):
+            if pth.exists():
+                saved.append(pth)
+        if verbose and (k % 25 == 0 or k == total):
+            print(f"  per-event figures: {k}/{total} storms")
+
     if verbose:
-        print(f"\nSaved:\n  {csv_path}\n  {fig_path}")
-    return sweep, [csv_path, fig_path]
+        print(f"Saved {len(saved)} per-event figures for {total} storms under\n"
+              f"  {paths['storm_track']}\n  {paths['storm_time_steps']}")
+    return saved

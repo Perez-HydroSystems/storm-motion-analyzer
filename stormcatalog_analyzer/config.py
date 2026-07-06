@@ -35,24 +35,24 @@ class IOConfig:
 
 @dataclass
 class TrackingConfig:
-    var_name: str = "rain"
-    morph_radius: int = 2
-    high_threshold: float = 0.5
-    ellipse_fit: str = "moments"  # "moments" | "contour"
-    ratio_threshold: float = 0.2
-    dry_spell_time: int = 0
+    rainfall_var_name: str = "rain"          # name of the rain variable in the NetCDF
+    morph_radius_cells: int = 2              # morphological merge radius (grid cells)
+    rainfall_threshold_mmhr: float = 0.5     # rain-rate threshold for identification (mm/hr)
+    ellipse_fit_method: str = "moments"      # "moments" | "contour"
+    overlap_ratio_threshold: float = 0.2     # storm-overlap ratio to link across time (fraction)
+    dry_spell_steps: int = 0                 # allowed gap when matching storms (time steps)
 
 
 @dataclass
 class SelectionConfig:
-    min_duration_steps: int = 6
-    area_portion_threshold: float = 0.05
+    min_duration_steps: int = 6              # drop storms shorter than this (time steps)
+    min_area_fraction: float = 0.05          # storm must cover >= this fraction of the domain
 
 
 @dataclass
 class MotionConfig:
-    storm_interval: str = "12H"
-    top_n_trajectories: int = 100
+    intensity_window: str = "12H"            # window for the most-intense period (e.g. "12H")
+    n_trajectories_plotted: int = 100        # number of trajectories drawn on the map
 
 
 @dataclass
@@ -112,17 +112,17 @@ class Config:
     # --- validation ------------------------------------------------------
     def validate(self) -> "Config":
         errors = []
-        if self.tracking.ellipse_fit not in {"moments", "contour"}:
+        if self.tracking.ellipse_fit_method not in {"moments", "contour"}:
             errors.append(
-                f"tracking.ellipse_fit must be 'moments' or 'contour', "
-                f"got {self.tracking.ellipse_fit!r}"
+                f"tracking.ellipse_fit_method must be 'moments' or 'contour', "
+                f"got {self.tracking.ellipse_fit_method!r}"
             )
-        if self.tracking.morph_radius <= 0:
-            errors.append("tracking.morph_radius must be > 0")
-        if not (0 < self.selection.area_portion_threshold < 1):
-            errors.append("selection.area_portion_threshold must be in (0, 1)")
-        if self.motion.top_n_trajectories <= 0:
-            errors.append("motion.top_n_trajectories must be > 0")
+        if self.tracking.morph_radius_cells <= 0:
+            errors.append("tracking.morph_radius_cells must be > 0")
+        if not (0 < self.selection.min_area_fraction < 1):
+            errors.append("selection.min_area_fraction must be in (0, 1)")
+        if self.motion.n_trajectories_plotted <= 0:
+            errors.append("motion.n_trajectories_plotted must be > 0")
         if not self.catalog_dir.exists():
             errors.append(f"io.catalog_dir does not exist: {self.catalog_dir}")
         if errors:

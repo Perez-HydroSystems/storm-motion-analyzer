@@ -21,7 +21,7 @@ stormcatalog_analyzer/         # the package (import as `stormcatalog_analyzer`)
   config.py     # Config dataclasses + load_config(json) + validation; SINGLE source of truth
   io.py         # discover_events, open_event (xarray), load_vector (geopandas), output dirs
   pipeline.py   # run_catalog_tracking -> summarize_motion -> generate_catalog_diagnostics; run()
-  cli.py        # argparse; subcommand `diagnostics` (event/params planned)
+  cli.py        # argparse; subcommands `diagnostics`, `event`
   tracking/     # identification.py, tracking.py, catalog.py, dataset.py  (storm tracking core)
   motion/       # direction.py (per-storm dir/speed), grid.py (storm-motion grid, experimental)
   stats/        # circular.py (circular_mean/percentile/trend/permutation)
@@ -57,15 +57,22 @@ The package was migrated from a flat `functions/` folder; the old orchestration 
   `mean_major_axis_km`, `mean_minor_axis_km`, `mean_ellipse_angle_deg`, `angular_variance`, etc.
 
 ## Config (config.py)
-JSON ⇄ dataclasses, validated once. Sections: `io` (catalog_dir, transposition_domain_path,
-control_area_path?, grid_path?, output_dir, domain_name), `tracking` (var_name, morph_radius,
-high_threshold, ellipse_fit∈{moments,contour}, ratio_threshold, dry_spell_time),
-`selection` (min_duration_steps, area_portion_threshold), `motion` (storm_interval,
-top_n_trajectories), `figure` (font_size, dpi, smooth_factor). Paths resolve relative to
-`project_root`; **no absolute paths in committed code/configs**.
+JSON ⇄ dataclasses, validated once. Parameter names are self-explanatory with a unit suffix.
+Sections:
+- `io`: catalog_dir, transposition_domain_path, control_area_path?, grid_path?, output_dir,
+  domain_name, max_events?
+- `tracking`: rainfall_var_name, morph_radius_cells, rainfall_threshold_mmhr,
+  ellipse_fit_method∈{moments,contour}, overlap_ratio_threshold, dry_spell_steps
+- `selection`: min_duration_steps, min_area_fraction
+- `motion`: intensity_window (e.g. "12H"), n_trajectories_plotted
+- `figure`: font_size, dpi, smooth_factor, arrow_scale, arrow_width, head_width, head_length
+
+Paths resolve relative to `project_root`; **no absolute paths in committed code/configs**.
+(overlap_ratio_threshold, dry_spell_steps, min_area_fraction are config-only for now — the
+low-level tracking functions still use their internal defaults.)
 
 ## Input data
-NetCDF per event: dims `(time, latitude, longitude)`, rain var named by `tracking.var_name`
+NetCDF per event: dims `(time, latitude, longitude)`, rain var named by `tracking.rainfall_var_name`
 (default `"rain"`; the legacy `storm_events/` samples use `"RAINRATE"` — set accordingly).
 CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
 
@@ -79,13 +86,14 @@ CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
 
 ## Conventions / gotchas
 - Direction: `direction_deg` math convention (0=E, CCW+); `bearing_deg` compass (0=N, CW+).
-- `ellipse_fit`: contour method only when exactly `"contour"`; anything else ⇒ moments.
+- `ellipse_fit_method`: contour method only when exactly `"contour"`; anything else ⇒ moments.
 - `mean_direction_weighted` returns 2 values normally but 3 when `len(x)<2` — pipeline guards `len(x)>=2`.
 - The CONUS domain-location inset needs a special `grid` shapefile (`row_index`/`col_index`/`left`…);
   it's optional now (`grid_path: null`) and skipped via `_annotate_conus_grid` when absent.
 - Diagnostic plot functions hardcode `savefig(dpi=300)` and take `save_path` as a **string**
   (they do `save_path + "/..."`), so pass `str(dir)`.
-- Benign warnings: pandas `'H'`→`'h'` deprecation (storm_interval), cartopy/tight_layout notes.
+- Benign warnings: pandas `'H'`→`'h'` deprecation (intensity_window), cartopy/tight_layout notes.
+- Grid modules: `motion/grid.py` = compute; `plotting/motion_grid.py` = the grid plot functions.
 
 ## Git / workflow
 - Remote: `git@github.com:Perez-HydroSystems/storm-motion-analyzer.git` (SSH), default branch `main`.
@@ -95,19 +103,20 @@ CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
 ## CLI subcommands (cli.py / run_diagnostics.py)
 - `diagnostics` → `pipeline.run` (catalog-level figures). Default subcommand of `run_diagnostics.py`.
 - `event --storm <name|substring|id>` → `pipeline.generate_event_diagnostics` (per-event track + time-steps).
-- `params --param <high_threshold|morph_radius|min_duration_steps|max_events> --values …` →
-  `pipeline.generate_parameter_analysis` (sensitivity sweep CSV + figure). Use `--max-events` to subsample.
+- `generate_all_event_diagnostics(cfg, results, summary)` → per-event figures for EVERY storm
+  (reuses `run()` output; no re-tracking). Notebook cell in `storm_motion_catalog.ipynb`.
+- `--max-events N` (general flag) / `io.max_events` subsamples the catalog to the first N events.
 
 ## Notebooks
-- `storm_tracking_results.ipynb` (root) — catalog diagnostics.
-- `notebooks/storm_event_tracking.ipynb` — per-event figures.
-- `notebooks/parameter_analysis.ipynb` — parameter sweep.
-- 2 & 3 start with a bootstrap cell that chdirs to the repo root, so they run from anywhere.
+- `storm_motion_catalog.ipynb` (root) — catalog diagnostics + a cell for all per-event figures.
+- `notebooks/storm_motion_event.ipynb` — per-event figures for one storm.
+- The event notebook starts with a bootstrap cell that chdirs to the repo root, so it runs from anywhere.
 
 ## Status
-- **Done:** full package restructure; config/io/pipeline/cli; all 3 notebooks + 3 CLI subcommands;
-  `.gitignore`; fixed the undefined `_plot_geographic_outline` bug; made the CONUS `grid` inset optional;
-  added `io.max_events`. Verified end-to-end on `testing_data/` (full 400-storm catalog, per-event, sweep).
+- **Done:** full package restructure; config/io/pipeline/cli; 2 notebooks + 2 CLI subcommands
+  (`diagnostics`, `event`); `.gitignore`; fixed the undefined `_plot_geographic_outline` bug; made the
+  CONUS `grid` inset optional; added `io.max_events`. Verified end-to-end on `testing_data/`
+  (full 400-storm catalog + per-event).
 - **Shared helper:** `pipeline.compute_storm_trajectory(storm, interval, storm_id)` computes one storm's
   window/direction/speed AND writes those metrics back onto the event_dict (the per-event plots read them there);
   used by both `summarize_motion` and `track_one_event`.

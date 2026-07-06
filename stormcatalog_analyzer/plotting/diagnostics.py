@@ -463,28 +463,3 @@ def plot_storm_properties_pairplot(storm_properties, save_path, domain_name, dpi
     g.savefig(out, dpi=dpi, bbox_inches="tight")
     plt.close(g.figure)
     return out
-
-
-def plot_parameter_sweep(sweep_df, param, save_path, domain_name, dpi=300):
-    """Line plots of catalog aggregates vs a swept parameter; saves a PNG. Returns its path."""
-    metrics = [
-        ("n_storms", "# storms retained"),
-        ("mean_direction_deg", "Mean direction (deg)"),
-        ("mean_speed_ms", "Mean speed (m/s)"),
-        ("mean_intensity_mmh", "Mean intensity (mm/h)"),
-    ]
-    metrics = [m for m in metrics if m[0] in sweep_df.columns]
-    fig, axes = plt.subplots(1, len(metrics), figsize=(4 * len(metrics), 4))
-    if len(metrics) == 1:
-        axes = [axes]
-    for ax, (col, lab) in zip(axes, metrics):
-        ax.plot(sweep_df[param], sweep_df[col], "o-")
-        ax.set_xlabel(param)
-        ax.set_ylabel(lab)
-        ax.grid(True, alpha=0.3)
-    fig.suptitle(f"Parameter sensitivity: {param}  -  Domain {domain_name}", fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
-    out = os.path.join(str(save_path), f"parameter_sweep_{param}_{domain_name}.png")
-    fig.savefig(out, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    return out

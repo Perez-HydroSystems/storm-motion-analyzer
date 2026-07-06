@@ -107,15 +107,11 @@ python run_diagnostics.py --config configs/testing_data.json
 
 # 2) Per-event tracking figures for a single storm (by filename, substring, or id)
 python run_diagnostics.py event --config configs/testing_data.json --storm 100
-
-# 3) Parameter sensitivity sweep (rainfall threshold / duration / number of events)
-python run_diagnostics.py params --config configs/testing_data.json \
-    --param high_threshold --values 0.2 0.5 1.0 --max-events 60
 ```
 
-(If installed: `stormcatalog-analyzer diagnostics|event|params ...`.)
+(If installed: `stormcatalog-analyzer diagnostics|event ...`.)
 
-**Notebook:** open [`storm_tracking_results.ipynb`](storm_tracking_results.ipynb) —
+**Notebook:** open [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) —
 it loads the config and calls the same pipeline.
 
 **Python API:**
@@ -125,7 +121,7 @@ from stormcatalog_analyzer.config import load_config
 from stormcatalog_analyzer import pipeline
 
 cfg = load_config("configs/testing_data.json")
-cfg.tracking.high_threshold = 0.5      # optional inline overrides
+cfg.tracking.rainfall_threshold_mmhr = 0.5   # optional inline overrides
 out = pipeline.run(cfg)                # track -> summarize -> diagnostics
 out["summary"].storm_properties.head()
 print(out["figures"])                  # saved figure paths
@@ -141,9 +137,8 @@ Outputs are written to `<output_dir>/<domain_name>/`:
 
 | Notebook | Purpose |
 |----------|---------|
-| [`storm_tracking_results.ipynb`](storm_tracking_results.ipynb) | **Main** — catalog in, full diagnostic-plot set out. |
-| [`notebooks/storm_event_tracking.ipynb`](notebooks/storm_event_tracking.ipynb) | Per-event spatiotemporal evolution + fitted ellipse. |
-| [`notebooks/parameter_analysis.ipynb`](notebooks/parameter_analysis.ipynb) | Sensitivity to rainfall threshold / duration / number of events. |
+| [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) | **Main** — catalog in, full diagnostic-plot set + per-event figures out. |
+| [`notebooks/storm_motion_event.ipynb`](notebooks/storm_motion_event.ipynb) | Per-event spatiotemporal evolution + fitted ellipse. |
 | `notebooks/legacy/` | Older exploratory notebooks (unmaintained). |
 
 ## 📈 Output Products

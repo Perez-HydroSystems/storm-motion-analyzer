@@ -4,8 +4,6 @@ Usage::
 
     stormcatalog-analyzer diagnostics --config configs/testing_data.json
     stormcatalog-analyzer event       --config configs/testing_data.json --storm 100
-    stormcatalog-analyzer params      --config configs/testing_data.json \\
-        --param high_threshold --values 0.2 0.5 1.0 --max-events 60
 
 The root helper ``run_diagnostics.py`` defaults to the ``diagnostics`` subcommand,
 so ``python run_diagnostics.py --config configs/testing_data.json`` also works.
@@ -16,7 +14,7 @@ import argparse
 
 from .config import load_config
 
-SUBCOMMANDS = ("diagnostics", "event", "params")
+SUBCOMMANDS = ("diagnostics", "event")
 
 
 def _apply_overrides(cfg, args):
@@ -45,16 +43,6 @@ def cmd_event(args) -> int:
     return 0
 
 
-def cmd_params(args) -> int:
-    cfg = _apply_overrides(load_config(args.config), args)
-    from .pipeline import generate_parameter_analysis
-
-    sweep, _ = generate_parameter_analysis(cfg, args.param, args.values, verbose=not args.quiet)
-    if not args.quiet:
-        print("\n" + sweep.to_string(index=False))
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stormcatalog-analyzer",
@@ -78,15 +66,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--storm", required=True,
                    help="Storm filename, unique substring, or numeric id (e.g. 100).")
     p.set_defaults(func=cmd_event)
-
-    p = sub.add_parser("params", help="Parameter sensitivity sweep.")
-    _common(p)
-    p.add_argument("--param", required=True,
-                   choices=["high_threshold", "morph_radius", "min_duration_steps", "max_events"],
-                   help="Parameter to sweep.")
-    p.add_argument("--values", required=True, nargs="+", type=float,
-                   help="Values to try (e.g. 0.2 0.5 1.0).")
-    p.set_defaults(func=cmd_params)
 
     return parser
 
