@@ -82,6 +82,7 @@ def ensure_output_dirs(cfg: Config) -> dict:
         "base": base,
         "storm_track": base / "StormTrack",
         "storm_time_steps": base / "StormTimeSteps",
+        "storm_animation": base / "StormAnimation",
     }
     for p in paths.values():
         p.mkdir(parents=True, exist_ok=True)

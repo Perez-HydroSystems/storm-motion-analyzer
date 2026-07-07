@@ -26,7 +26,8 @@ stormcatalog_analyzer/         # the package (import as `stormcatalog_analyzer`)
   motion/       # direction.py (per-storm dir/speed), grid.py (storm-motion grid, experimental)
   stats/        # circular.py (circular_mean/percentile/trend/permutation)
   plotting/     # helpers.py (_plot_geographic_outline, _annotate_conus_grid),
-                #   diagnostics.py (catalog-level figures + pairplot), per_event.py (track/time-steps)
+                #   diagnostics.py (catalog-level figures + pairplot), per_event.py (track/time-steps),
+                #   animation.py (animate_storm_tracking -> per-storm tracking GIF)
   geometry.py   # control-area shapefile builders
 run_diagnostics.py   # thin root CLI wrapper (defaults to `diagnostics`)
 configs/testing_data.json  # default config -> relative paths into testing_data/
@@ -108,10 +109,18 @@ CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
 - `event --storm <name|substring|id>` → `pipeline.generate_event_diagnostics` (per-event track + time-steps).
 - `generate_all_event_diagnostics(cfg, results, summary)` → per-event figures for EVERY storm
   (reuses `run()` output; no re-tracking). Notebook cell in `storm_motion_catalog.ipynb`.
+- `generate_event_animation(cfg, storm, **kw)` → per-storm tracking GIF via
+  `plotting.animation.animate_storm_tracking` (3 phases: storm moving → current-step ellipse +
+  growing centroid trail → trajectory + mean-direction vector + stats box). Re-tracks one event;
+  the notebook cell (§6) instead reuses `out["results"]`/`summary.storm_trajectories` (no re-tracking).
+  Saved to `<output_dir>/<domain>/StormAnimation/`. Needs Pillow (PillowWriter). Reads motion metrics
+  (`mean_direction_weighted`/`mean_velocity`/`var_dir_weighted`) off the event_dict — present because
+  `compute_storm_trajectory` writes them there.
 - `--max-events N` (general flag) / `io.max_events` subsamples the catalog to the first N events.
 
 ## Notebooks
-- `storm_motion_catalog.ipynb` (root) — catalog diagnostics + a cell for all per-event figures.
+- `storm_motion_catalog.ipynb` (root) — catalog diagnostics + a cell for all per-event figures,
+  §5 direction-probability summary, §6 storm-tracking animation GIF.
 - `notebooks/storm_motion_event.ipynb` — per-event figures for one storm.
 - The event notebook starts with a bootstrap cell that chdirs to the repo root, so it runs from anywhere.
 

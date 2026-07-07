@@ -424,6 +424,31 @@ def generate_event_diagnostics(cfg: Config, storm: str, verbose: bool = True) ->
     return saved
 
 
+def generate_event_animation(cfg: Config, storm: str, save_path=None,
+                             verbose: bool = True, **kwargs) -> str:
+    """Render the storm-tracking illustration GIF for a single storm.
+
+    Tracks one event (like ``generate_event_diagnostics``) and writes an animated
+    GIF of the three-phase workflow: the storm moving, then the per-step fitted
+    ellipse + accumulating centroid trail, then the full trajectory with the
+    mean-direction vector and a statistics box. Extra keyword arguments pass
+    through to ``plotting.animation.animate_storm_tracking`` (``fps``,
+    ``rainfall_threshold``, ``hold_frames``, ``dpi``, ...).
+    """
+    from .plotting.animation import animate_storm_tracking
+
+    results, trajectories = track_one_event(cfg, storm)
+    name = next(iter(results))
+    if save_path is None:
+        save_path = scio.ensure_output_dirs(cfg)["storm_animation"]
+    out = animate_storm_tracking(
+        results, name, trajectories, save_path=str(save_path), **kwargs
+    )
+    if verbose:
+        print(f"Saved storm-tracking animation for {name}:\n  {out}")
+    return out
+
+
 def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
                                    summary: "MotionSummary", verbose: bool = True) -> List[Path]:
     """Render per-event figures (storm track + time-step panels) for EVERY storm.
