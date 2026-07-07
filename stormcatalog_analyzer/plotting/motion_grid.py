@@ -4,10 +4,14 @@ Moved from motion/grid.py: these render already-computed grid dicts produced by
 ``stormcatalog_analyzer.motion.grid`` (build_storm_motion_grid,
 calculate_direction_probability_field, build_trajectory_direction_grid, ...).
 """
+import os
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from matplotlib.patches import Ellipse, Wedge, FancyArrowPatch
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 from pyproj import Transformer
 
 
@@ -379,6 +383,7 @@ def plot_direction_probability_field(
     show_counts=False,
     min_total_count=None,
     count_threshold=None,
+    show_colorbar=True,
     show_bin_arrow=True,
     bin_arrow_size=0.12,
     bin_arrow_edgecolor="black",
@@ -455,7 +460,8 @@ def plot_direction_probability_field(
         vmax=vmax,
         shading="auto",
     )
-    plt.colorbar(mesh, ax=ax, label="Direction probability")
+    if show_colorbar:
+        plt.colorbar(mesh, ax=ax, label="Direction probability")
 
     if show_counts and np.nanmax(total_counts) > 0:
         ax.contour(
@@ -761,7 +767,11 @@ def set_projected_axis_geographic_ticks(
     ax.set_xticks(x_ticks)
     ax.set_yticks(y_ticks)
     ax.set_xticklabels([lon_format.format(lon) for lon in lon_labels])
-    ax.set_yticklabels([lat_format.format(lat) for lat in lat_labels])
+    # Rotate the latitude tick labels to vertical so they take less horizontal
+    # space and do not overlap the "Latitude" axis title.
+    ax.set_yticklabels(
+        [lat_format.format(lat) for lat in lat_labels], rotation=90, va="center"
+    )
     ax.tick_params(axis="both", which="major", labelbottom=True, labelleft=True)
 
     if set_axis_labels:
@@ -769,3 +779,194 @@ def set_projected_axis_geographic_ticks(
         ax.set_ylabel("Latitude")
 
     return ax
+
+
+def plot_direction_probability_summary(
+    prob_field,
+    transposition_domain=None,
+    grid=None,
+    count_threshold=100,
+    region_labels=None,
+    bin_indices=None,
+    figsize=(16, 9),
+    save_path=None,
+    fig_name=None,
+    dpi=300,
+):
+    """Storm-motion direction diagnostic (adapts to the number of sectors).
+
+    Panels: (a) total directional counts, (b) transposition-domain location,
+    (c) per-sector direction-probability fields, (d) direction-sector wheel.
+
+    The number of sectors comes from ``prob_field`` (i.e. from
+    ``config.direction_grid.n_sectors`` via ``calculate_direction_probability_field``);
+    panel (c) is laid out on an automatic ~square grid and the wheel shows all sectors.
+    Panel (b) shows the whole CONUS with the 5x5 reference-grid index labels when
+    ``grid`` is given; otherwise it zooms to the transposition domain (+1 degree on
+    each side) over the national and state borders. Saves to ``save_path`` if
+    provided, otherwise returns the Figure.
+    """
+    import math
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    from .helpers import _plot_geographic_outline, _annotate_conus_grid
+
+    n_bins = int(np.asarray(prob_field["probability"]).shape[0])
+    romans = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+    all_labels = [romans[i] if i < len(romans) else str(i + 1) for i in range(n_bins)]
+    bin_indices = list(range(n_bins)) if bin_indices is None else list(bin_indices)
+    if region_labels is None:
+        region_labels = [all_labels[b] for b in bin_indices]
+    else:
+        region_labels = list(region_labels)
+    n_panels = len(bin_indices)
+
+    fig = plt.figure(figsize=figsize)
+    gs = gridspec.GridSpec(
+        2, 4, figure=fig,
+        width_ratios=[1.20, 0.9, 0.9, 0.20], height_ratios=[1, 1],
+        wspace=0.05, hspace=0.20,
+    )
+
+    # (a) total directional counts
+    ax_counts = fig.add_subplot(gs[0, 0])
+    prob_counts = prob_field["total_counts"]
+    span = max(count_threshold - 0, np.nanmax(prob_counts) - count_threshold)
+    vmax_count = count_threshold + span
+    greys = plt.cm.Greys(np.linspace(0.15, 0.85, 128))
+    blues = plt.cm.Blues(np.linspace(0.35, 1.00, 128))
+    count_cmap = LinearSegmentedColormap.from_list("Greys_to_Blues", np.vstack([greys, blues]))
+    count_norm = TwoSlopeNorm(vmin=0, vcenter=count_threshold, vmax=vmax_count)
+    mesh_counts = ax_counts.pcolormesh(
+        prob_field["x_edges"], prob_field["y_edges"], prob_counts,
+        cmap=count_cmap, norm=count_norm, shading="auto",
+    )
+    cbar_counts = fig.colorbar(mesh_counts, ax=ax_counts, label="Total Directional Counts")
+    cbar_counts.ax.text(
+        1.15, count_threshold, f"{count_threshold}", color="black", va="center", ha="left",
+        transform=cbar_counts.ax.get_yaxis_transform(),
+    )
+    ax_counts.set_title("a) Total Directional Counts", fontsize=12)
+    ax_counts.set_aspect("equal")
+
+    # (b) transposition domain location. With the CONUS 5x5 reference grid we show
+    # the whole country (paper figure); without it we zoom to the transposition
+    # domain (+1 degree on each side) so a single small domain is not lost on a
+    # CONUS-wide map, keeping national and state borders in the background.
+    font_size = 2
+    ax_grid = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+    ax_grid.set_title("b) Transposition Domain Location", fontsize=12)
+    _plot_geographic_outline(
+        transposition_domain, ax_grid, label="Transposition Domain",
+        edgecolor="green", linewidth=2,
+    )
+    gl_grid = ax_grid.gridlines(draw_labels=True, linestyle="--")
+    gl_grid.top_labels = False
+    gl_grid.right_labels = False
+    gl_grid.xlabel_style = {"size": 10}
+    gl_grid.ylabel_style = {"size": 10}
+    ax_grid.add_feature(cfeature.STATES, edgecolor="lightgray", linewidth=0.5)
+    if grid is not None:
+        ax_grid.set_extent([-129, -65, 25, 53], crs=ccrs.PlateCarree())
+        _annotate_conus_grid(ax_grid, grid, font_size=font_size)
+    else:
+        # No reference grid: keep national + state borders for context and zoom to
+        # the domain bounds with a 1-degree pad. set_extent runs last so it wins
+        # over the automatic zoom geopandas applies when drawing the outline.
+        ax_grid.add_feature(cfeature.BORDERS, edgecolor="gray", linewidth=0.6)
+        ax_grid.add_feature(cfeature.COASTLINE, edgecolor="gray", linewidth=0.6)
+        domain_extent = [-129, -65, 25, 53]
+        if transposition_domain is not None:
+            try:
+                minx, miny, maxx, maxy = np.asarray(
+                    transposition_domain.total_bounds, dtype=float
+                )
+                pad = 1.0  # degrees of space on each side
+                domain_extent = [minx - pad, maxx + pad, miny - pad, maxy + pad]
+            except Exception:
+                pass
+        ax_grid.set_extent(domain_extent, crs=ccrs.PlateCarree())
+
+    # (c) direction probability fields: automatic ~square grid of shared axes
+    ncols = int(math.ceil(math.sqrt(n_panels)))
+    nrows = int(math.ceil(n_panels / ncols))
+    prob_gs = gs[:, 1:3].subgridspec(nrows, ncols, wspace=0.12, hspace=0.28)
+    prob_axes = []
+    ax0 = None
+    for idx in range(n_panels):
+        r, c = divmod(idx, ncols)
+        ax = fig.add_subplot(prob_gs[r, c]) if ax0 is None else \
+            fig.add_subplot(prob_gs[r, c], sharex=ax0, sharey=ax0)
+        ax0 = ax0 or ax
+        prob_axes.append(ax)
+
+    prob_x0 = min(ax.get_position().x0 for ax in prob_axes)
+    prob_x1 = max(ax.get_position().x1 for ax in prob_axes)
+    prob_y1 = max(ax.get_position().y1 for ax in prob_axes)
+    fig.text((prob_x0 + prob_x1) / 2, prob_y1 + 0.05, "c) Direction Probability Fields",
+             ha="center", va="bottom", fontsize=12)
+
+    prob_mappable = None
+    for ax, bidx, region_label in zip(prob_axes, bin_indices, region_labels):
+        plot_direction_probability_field(
+            prob_field, bin_index=bidx, ax=ax, vmin=0, count_threshold=count_threshold,
+            show_bin_arrow=True, show_colorbar=False, cmap="Reds",
+        )
+        ax.set_title(prob_field["angle_labels"][bidx])
+        ax.text(
+            0.03, 0.97, region_label, transform=ax.transAxes, color="black",
+            fontsize=14, fontweight="bold", ha="left", va="top",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="black", alpha=0.75),
+            zorder=20,
+        )
+        if ax.collections:
+            prob_mappable = ax.collections[0]
+
+    # right column: direction-sector wheel (top) + probability colorbar (bottom)
+    if n_bins <= 4:
+        sector_colors = ["#f4a261", "#2a9d8f", "#457b9d", "#e76f51"][:n_bins]
+    else:
+        sector_colors = [plt.cm.hsv(k / n_bins) for k in range(n_bins)]
+    ax_right = fig.add_subplot(gs[:, 3])
+    ax_right.axis("off")
+    ax_cardinal = inset_axes(
+        ax_right, width="140%", height="50%", loc="upper center",
+        bbox_to_anchor=(-0.2, 0.0, 1.6, 1.2), bbox_transform=ax_right.transAxes, borderpad=0,
+    )
+    plot_cardinal_direction_sectors(
+        ax=ax_cardinal, sector_ranges=list(prob_field["angle_ranges"]),
+        sector_labels=all_labels, sector_colors=sector_colors, radius=1.0, arrow_scale=18,
+    )
+    ax_cardinal.set_title("d) Direction Regions", fontsize=12)
+
+    cax_prob = inset_axes(
+        ax_right, width="28%", height="70%", loc="lower center",
+        bbox_to_anchor=(-0.2, 0.00, 1, 1), bbox_transform=ax_right.transAxes, borderpad=0,
+    )
+    max_prob = np.nanmax(prob_field["probability"])
+    if prob_mappable is not None:
+        prob_mappable.set_clim(0, max_prob if max_prob > 0 else 1.0)
+        cbar = fig.colorbar(prob_mappable, cax=cax_prob, orientation="vertical")
+        cbar.set_label("Direction Probability", fontsize=11)
+
+    # geographic ticks on the projected map panels, then de-clutter shared axes
+    for ax in [ax_counts] + prob_axes:
+        set_projected_axis_geographic_ticks(
+            ax, source_crs="EPSG:2163", n_ticks=4, lon_format="{:.1f}°", lat_format="{:.1f}°",
+        )
+    for idx, ax in enumerate(prob_axes):
+        r, c = divmod(idx, ncols)
+        if c != 0:
+            ax.tick_params(labelleft=False)
+            ax.set_ylabel("")
+        if r != nrows - 1:
+            ax.tick_params(labelbottom=False)
+            ax.set_xlabel("")
+
+    if save_path:
+        out = os.path.join(str(save_path), f"direction_probability_summary_{fig_name}.png")
+        fig.savefig(out, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return out
+    return fig

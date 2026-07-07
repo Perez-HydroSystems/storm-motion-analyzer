@@ -471,3 +471,51 @@ def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
         print(f"Saved {len(saved)} per-event figures for {total} storms under\n"
               f"  {paths['storm_track']}\n  {paths['storm_time_steps']}")
     return saved
+
+
+# --------------------------------------------------------------------------
+# Storm-motion direction-probability field (grid diagnostic)
+# --------------------------------------------------------------------------
+def build_direction_probability_field(results: Dict[str, dict], cfg: Config,
+                                      verbose: bool = True):
+    """Aggregate per-storm motion grids into a per-cell direction-probability field.
+
+    Builds one storm-motion grid per storm on a **shared** projected extent (so the
+    grids align), then bins the directions into ``cfg.direction_grid.n_sectors`` sectors.
+    Grid resolution, sector count, and start angle come from ``cfg.direction_grid``.
+    """
+    from .motion.grid import build_storm_motion_grid, calculate_direction_probability_field
+
+    dg = cfg.direction_grid
+    angle_bin_size = 360.0 / dg.n_sectors
+    start_angle = dg.start_angle_deg if dg.start_angle_deg is not None else -(angle_bin_size / 2.0)
+    cell_size_km = dg.cell_size_km
+
+    events = {k: v for k, v in results.items() if v and "lon_prj_array" in v}
+    if not events:
+        raise RuntimeError("no tracked storms with projected grids available")
+
+    xmin = min(np.nanmin(v["lon_prj_array"]) for v in events.values())
+    xmax = max(np.nanmax(v["lon_prj_array"]) for v in events.values())
+    ymin = min(np.nanmin(v["lat_prj_array"]) for v in events.values())
+    ymax = max(np.nanmax(v["lat_prj_array"]) for v in events.values())
+    extent = (xmin, xmax, ymin, ymax)
+
+    motion_grids = []
+    for name, event_dict in events.items():
+        try:
+            motion_grids.append(
+                build_storm_motion_grid(event_dict, cell_size_m=cell_size_km * 1000.0, extent=extent)
+            )
+        except Exception as exc:  # a storm may have no cells inside any ellipse
+            if verbose:
+                print(f"  motion grid skipped for {name}: {type(exc).__name__}")
+    if not motion_grids:
+        raise RuntimeError("no storm-motion grids could be built")
+
+    if verbose:
+        print(f"Built {len(motion_grids)} storm-motion grids "
+              f"({cell_size_km:g} km cells); {dg.n_sectors} sectors ({angle_bin_size:g} deg each).")
+    return calculate_direction_probability_field(
+        motion_grids, angle_bin_size=angle_bin_size, start_angle=start_angle
+    )

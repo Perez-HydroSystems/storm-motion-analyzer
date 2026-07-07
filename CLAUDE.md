@@ -66,6 +66,9 @@ Sections:
 - `selection`: min_duration_steps, min_area_fraction
 - `motion`: intensity_window (e.g. "12H"), n_trajectories_plotted
 - `figure`: font_size, dpi, smooth_factor, arrow_scale, arrow_width, head_width, head_length
+- `direction_grid`: n_sectors, cell_size_km, count_threshold, start_angle_deg — for the
+  storm-motion direction-probability diagnostic (`pipeline.build_direction_probability_field`
+  + `plotting.motion_grid.plot_direction_probability_summary`; panel (c)/wheel adapt to n_sectors)
 
 Paths resolve relative to `project_root`; **no absolute paths in committed code/configs**.
 (overlap_ratio_threshold, dry_spell_steps, min_area_fraction are config-only for now — the

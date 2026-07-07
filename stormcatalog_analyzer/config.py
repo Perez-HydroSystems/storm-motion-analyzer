@@ -68,12 +68,21 @@ class FigureConfig:
 
 
 @dataclass
+class DirectionGridConfig:
+    n_sectors: int = 4                        # number of direction sectors/bins (e.g. 4, 8)
+    cell_size_km: float = 50.0                # storm-motion grid cell size (km)
+    count_threshold: int = 100                # counts colormap split / min counts to show probability
+    start_angle_deg: Optional[float] = None   # None -> -(360/n_sectors)/2 (centers sectors on primary dirs)
+
+
+@dataclass
 class Config:
     io: IOConfig
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     selection: SelectionConfig = field(default_factory=SelectionConfig)
     motion: MotionConfig = field(default_factory=MotionConfig)
     figure: FigureConfig = field(default_factory=FigureConfig)
+    direction_grid: DirectionGridConfig = field(default_factory=DirectionGridConfig)
     project_root: str = "."
 
     # --- path resolution -------------------------------------------------
@@ -123,6 +132,10 @@ class Config:
             errors.append("selection.min_area_fraction must be in (0, 1)")
         if self.motion.n_trajectories_plotted <= 0:
             errors.append("motion.n_trajectories_plotted must be > 0")
+        if self.direction_grid.n_sectors < 2:
+            errors.append("direction_grid.n_sectors must be >= 2")
+        if self.direction_grid.cell_size_km <= 0:
+            errors.append("direction_grid.cell_size_km must be > 0")
         if not self.catalog_dir.exists():
             errors.append(f"io.catalog_dir does not exist: {self.catalog_dir}")
         if errors:
@@ -151,6 +164,7 @@ def from_dict(data: dict, project_root: Optional[str] = None) -> Config:
         selection=_section(SelectionConfig, data.get("selection", {})),
         motion=_section(MotionConfig, data.get("motion", {})),
         figure=_section(FigureConfig, data.get("figure", {})),
+        direction_grid=_section(DirectionGridConfig, data.get("direction_grid", {})),
         project_root=project_root or data.get("project_root", "."),
     )
     return cfg.validate()

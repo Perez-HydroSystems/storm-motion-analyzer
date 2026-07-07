@@ -33,5 +33,11 @@
     "arrow_width": 0.005,
     "head_width": 2.0,
     "head_length": 1.5
+  },
+  "direction_grid": {
+    "n_sectors": 4,
+    "cell_size_km": 50.0,
+    "count_threshold": 100,
+    "start_angle_deg": null
   }
 }
