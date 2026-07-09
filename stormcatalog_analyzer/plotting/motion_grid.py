@@ -786,6 +786,7 @@ def plot_direction_probability_summary(
     transposition_domain=None,
     grid=None,
     count_threshold=100,
+    domain_extent_factor=3.0,
     region_labels=None,
     bin_indices=None,
     figsize=(16, 9),
@@ -802,8 +803,9 @@ def plot_direction_probability_summary(
     ``config.direction_grid.n_sectors`` via ``calculate_direction_probability_field``);
     panel (c) is laid out on an automatic ~square grid and the wheel shows all sectors.
     Panel (b) shows the whole CONUS with the 5x5 reference-grid index labels when
-    ``grid`` is given; otherwise it zooms to the transposition domain (+1 degree on
-    each side) over the national and state borders. Saves to ``save_path`` if
+    ``grid`` is given; otherwise it shows a regional view centred on the transposition
+    domain that spans ``domain_extent_factor`` times the domain's longest side
+    (default 3x) over the national and state borders. Saves to ``save_path`` if
     provided, otherwise returns the Figure.
     """
     import math
@@ -823,9 +825,11 @@ def plot_direction_probability_summary(
     n_panels = len(bin_indices)
 
     fig = plt.figure(figsize=figsize)
+    # Column 1 is an empty spacer that keeps the (a) counts colorbar + its label clear
+    # of the (c) probability-field y tick labels.
     gs = gridspec.GridSpec(
-        2, 4, figure=fig,
-        width_ratios=[1.20, 0.9, 0.9, 0.20], height_ratios=[1, 1],
+        2, 5, figure=fig,
+        width_ratios=[1.20, 0.28, 0.9, 0.9, 0.20], height_ratios=[1, 1],
         wspace=0.05, hspace=0.20,
     )
 
@@ -851,9 +855,9 @@ def plot_direction_probability_summary(
     ax_counts.set_aspect("equal")
 
     # (b) transposition domain location. With the CONUS 5x5 reference grid we show
-    # the whole country (paper figure); without it we zoom to the transposition
-    # domain (+1 degree on each side) so a single small domain is not lost on a
-    # CONUS-wide map, keeping national and state borders in the background.
+    # the whole country (paper figure); without it we show a regional view centred on
+    # the transposition domain (spanning domain_extent_factor x its longest side) so a
+    # single small domain is not lost, keeping national and state borders in the back.
     font_size = 2
     ax_grid = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
     ax_grid.set_title("b) Transposition Domain Location", fontsize=12)
@@ -871,9 +875,10 @@ def plot_direction_probability_summary(
         ax_grid.set_extent([-129, -65, 25, 53], crs=ccrs.PlateCarree())
         _annotate_conus_grid(ax_grid, grid, font_size=font_size)
     else:
-        # No reference grid: keep national + state borders for context and zoom to
-        # the domain bounds with a 1-degree pad. set_extent runs last so it wins
-        # over the automatic zoom geopandas applies when drawing the outline.
+        # No reference grid: keep national + state borders for context and show a
+        # regional view spanning domain_extent_factor x the domain's longest side,
+        # centred on the domain. set_extent runs last so it wins over the automatic
+        # zoom geopandas applies when drawing the outline.
         ax_grid.add_feature(cfeature.BORDERS, edgecolor="gray", linewidth=0.6)
         ax_grid.add_feature(cfeature.COASTLINE, edgecolor="gray", linewidth=0.6)
         domain_extent = [-129, -65, 25, 53]
@@ -882,8 +887,9 @@ def plot_direction_probability_summary(
                 minx, miny, maxx, maxy = np.asarray(
                     transposition_domain.total_bounds, dtype=float
                 )
-                pad = 1.0  # degrees of space on each side
-                domain_extent = [minx - pad, maxx + pad, miny - pad, maxy + pad]
+                cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+                half = domain_extent_factor * max(maxx - minx, maxy - miny) / 2.0
+                domain_extent = [cx - half, cx + half, cy - half, cy + half]
             except Exception:
                 pass
         ax_grid.set_extent(domain_extent, crs=ccrs.PlateCarree())
@@ -891,7 +897,7 @@ def plot_direction_probability_summary(
     # (c) direction probability fields: automatic ~square grid of shared axes
     ncols = int(math.ceil(math.sqrt(n_panels)))
     nrows = int(math.ceil(n_panels / ncols))
-    prob_gs = gs[:, 1:3].subgridspec(nrows, ncols, wspace=0.12, hspace=0.28)
+    prob_gs = gs[:, 2:4].subgridspec(nrows, ncols, wspace=0.12, hspace=0.28)
     prob_axes = []
     ax0 = None
     for idx in range(n_panels):
@@ -907,10 +913,22 @@ def plot_direction_probability_summary(
     fig.text((prob_x0 + prob_x1) / 2, prob_y1 + 0.05, "c) Direction Probability Fields",
              ha="center", va="bottom", fontsize=12)
 
+    # Shared color scale across all panels: the maximum probability among the cells
+    # that are actually shown (total_counts > count_threshold), NOT the raw field
+    # maximum. Otherwise a sparse cell (few storms -> a sector probability up to 1.0,
+    # but hidden by the count threshold) would peg the colorbar at 1.0 -- and this
+    # flips on/off as the grid cell size changes the storms-per-cell counts.
+    prob_values = np.asarray(prob_field["probability"], dtype=float)
+    counts_all = np.asarray(prob_field["total_counts"])
+    shown_values = np.where(counts_all[None] > count_threshold, prob_values, np.nan)
+    max_prob = np.nanmax(shown_values) if np.any(np.isfinite(shown_values)) else np.nan
+    vmax_prob = max_prob if (np.isfinite(max_prob) and max_prob > 0) else 1.0
+
     prob_mappable = None
     for ax, bidx, region_label in zip(prob_axes, bin_indices, region_labels):
         plot_direction_probability_field(
-            prob_field, bin_index=bidx, ax=ax, vmin=0, count_threshold=count_threshold,
+            prob_field, bin_index=bidx, ax=ax, vmin=0, vmax=vmax_prob,
+            count_threshold=count_threshold,
             show_bin_arrow=True, show_colorbar=False, cmap="Reds",
         )
         ax.set_title(prob_field["angle_labels"][bidx])
@@ -928,7 +946,7 @@ def plot_direction_probability_summary(
         sector_colors = ["#f4a261", "#2a9d8f", "#457b9d", "#e76f51"][:n_bins]
     else:
         sector_colors = [plt.cm.hsv(k / n_bins) for k in range(n_bins)]
-    ax_right = fig.add_subplot(gs[:, 3])
+    ax_right = fig.add_subplot(gs[:, 4])
     ax_right.axis("off")
     ax_cardinal = inset_axes(
         ax_right, width="140%", height="50%", loc="upper center",
@@ -944,9 +962,9 @@ def plot_direction_probability_summary(
         ax_right, width="28%", height="70%", loc="lower center",
         bbox_to_anchor=(-0.2, 0.00, 1, 1), bbox_transform=ax_right.transAxes, borderpad=0,
     )
-    max_prob = np.nanmax(prob_field["probability"])
     if prob_mappable is not None:
-        prob_mappable.set_clim(0, max_prob if max_prob > 0 else 1.0)
+        # every panel was drawn with vmax=vmax_prob, so the colorbar (built from the
+        # last panel's mesh) is consistent with all of them
         cbar = fig.colorbar(prob_mappable, cax=cax_prob, orientation="vertical")
         cbar.set_label("Direction Probability", fontsize=11)
 
