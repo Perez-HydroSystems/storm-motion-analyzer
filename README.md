@@ -2,13 +2,13 @@
 [![Python](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
  
-Storm detection and tracking toolkit for characterizing storm motion from hourly gridded rainfall data.
+Storm detection and tracking toolkit for characterizing storm motion from hourly gridded rainfall data. 
  
-## What this is
+## Tool description
  
-Storm motion-analyzer detects storm centers within NetCDF gridded rainfall data, tracks their trajectories over time (Lagrangian tracking), and characterizes their motion, intensity, and spatial extent. It supports the research described in *"Mapping the Motion of Historical Extreme Rainfall Events Across CONUS: A Dataset on Storm Tracks, Speed, and Structure"* (Osorio-Giraldo, Perez, Wright, and Liu).
+Storm Motion Analyzer detects storm centers within NetCDF gridded rainfall data, tracks their trajectories over time (Lagrangian tracking), and characterizes their motion, intensity, and spatial extent. It supports the research described in *"Mapping the Motion of Historical Extreme Rainfall Events Across CONUS: A Dataset on Storm Tracks, Speed, and Structure"* (Osorio-Giraldo, Perez, Wright, and Liu).
  
-It's built to work with storm catalogs generated with storm generatores or rainfall datasets.
+It works with storm catalogs from storm generators or rainfall datasets — for example, the catalogs produced by [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay).
 
 ![Storm tracking demo](storm_tracking_process.gif)
  
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 pip install -e .          # optional: enables the `stormcatalog-analyzer` CLI
 ```
  
-You need two things to run an analysis: an storm event ot a storm catalog (a folder of NetCDF events) and a JSON config. All inputs, paths, and model parameters live in one config file — see [`configs/testing_data.json`](configs/testing_data.json).
+You need two things to run an analysis: a storm event or a storm catalog (a folder of NetCDF events) and a JSON config. All inputs, paths, and model parameters live in one config file — see [`configs/testing_data.json`](configs/testing_data.json).
  
 ```bash
 # Catalog-level diagnostic plots (main deliverable)
@@ -77,26 +77,13 @@ Written to `<output_dir>/<domain_name>/`:
 
  
 
- 
-## Citation
- 
-```bibtex
-@article{osorio-giraldo2024mapping,
-  title={Mapping the Motion of Historical Extreme Rainfall Events Across CONUS: A Dataset on Storm Tracks, Speed, and Structure},
-  author={Osorio-Giraldo, Diego F. and Perez, Gabriel and Wright, Daniel B. and Liu, Yuan},
-  journal={[Journal Name]},
-  year={2024},
-  note={In preparation}
-}
-```
- 
 ## Authors
  
 - Diego F. Osorio-Giraldo, Gabriel Perez — School of Civil and Environmental Engineering, Oklahoma State University
-- Daniel B. Wright, Yuan Liu — Department of Civil and Environmental Engineering, University of Wisconsin-Madison
-## Acknowledgments
+
+
  
-Built on the NOAA AORC rainfall product and the RainyDay storm catalog generation framework.
+
  
 ## License
  

@@ -19,6 +19,9 @@ dist/
 .DS_Store
 *.swp
 
+# Claude Code (local settings; CLAUDE.md stays tracked)
+.claude/
+
 # Environments
 .venv/
 venv/

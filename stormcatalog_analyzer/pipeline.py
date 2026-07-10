@@ -65,10 +65,10 @@ def run_catalog_tracking(cfg: Config, verbose: bool = True) -> Dict[str, dict]:
                 high_threshold=t.rainfall_threshold_mmhr,
                 var_name=t.rainfall_var_name,
             )
-            if int(event_dict["longest_duration"]) < cfg.selection.min_duration_steps:
+            if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
                 if verbose:
                     print(f"skip {name}: duration {event_dict['longest_duration']} "
-                          f"< {cfg.selection.min_duration_steps}")
+                          f"< {cfg.selection.min_duration_hr}")
                 continue
             continuos_storm(event_dict)
             storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
@@ -99,9 +99,10 @@ class MotionSummary:
     mean_p: float
 
 
-def compute_storm_trajectory(storm: dict, interval: str, storm_id: int = 0) -> Optional[dict]:
+def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> Optional[dict]:
     """Compute one storm's most-intense-window trajectory + direction/speed.
 
+    ``window_hr`` is the most-intense-window length in hours (``motion.intensity_window_hr``).
     Side effect: writes the per-storm motion metrics back into ``storm`` (the
     event_dict) because the per-event plots read them from there. Returns the public
     trajectory dict (with a private ``_metrics`` key) or None if the storm has no
@@ -111,7 +112,8 @@ def compute_storm_trajectory(storm: dict, interval: str, storm_id: int = 0) -> O
     if np.nanmin(mean_p_ellipse) < 0:
         return None
     series = pd.Series(mean_p_ellipse, index=storm["selected_storm_time_steps"].values)
-    _, _, _, start_idx, end_idx = get_max_accumulated_value(series, interval)
+    window = pd.to_timedelta(window_hr, unit="h")
+    _, _, _, start_idx, end_idx = get_max_accumulated_value(series, window)
 
     x = storm["storm_prj_lon_cent_list"][start_idx:end_idx]
     y = storm["storm_prj_lat_cent_list"][start_idx:end_idx]
@@ -171,7 +173,7 @@ def compute_storm_trajectory(storm: dict, interval: str, storm_id: int = 0) -> O
 def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
     """Compute per-storm direction/speed/trajectory and catalog-level aggregates."""
     results = {k: v for k, v in results.items() if v}
-    interval = cfg.motion.intensity_window
+    window_hr = cfg.motion.intensity_window_hr
 
     storm_trajectories: dict = {}
     storm_mean_velocity: list = []
@@ -181,7 +183,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
 
     for i, (name, storm) in enumerate(results.items()):
         sid = _parse_storm_id(name, i)
-        traj = compute_storm_trajectory(storm, interval, storm_id=sid)
+        traj = compute_storm_trajectory(storm, window_hr, storm_id=sid)
         if traj is None:
             continue
         m = traj.pop("_metrics")
@@ -291,7 +293,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,
         mean_p_ellipse=np.float64(summary.mean_p),
-        time_window=cfg.motion.intensity_window,
+        time_window=cfg.motion.intensity_window_hr,
         grid=grid,
         save_path=save_dir,
         wsh=control_area,
@@ -310,7 +312,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,
         mean_p_ellipse=np.float64(summary.mean_p),
-        time_window=cfg.motion.intensity_window,
+        time_window=cfg.motion.intensity_window_hr,
         grid=grid,
         save_path=save_dir,
         wsh=control_area,
@@ -351,7 +353,8 @@ def run(cfg: Config, verbose: bool = True) -> dict:
 # --------------------------------------------------------------------------
 # Phase 2: single-event tracking figures
 # --------------------------------------------------------------------------
-_TIME_STEP_WINDOWS = {"6H", "8H", "12H", "16H", "24H"}
+# window lengths (hours) for which plot_storm_time_steps has a panel layout
+_TIME_STEP_WINDOWS = {6, 8, 12, 16, 24}
 
 
 def track_one_event(cfg: Config, storm: str):
@@ -366,10 +369,10 @@ def track_one_event(cfg: Config, storm: str):
             ds, event_dict,
             morph_radius=t.morph_radius_cells, high_threshold=t.rainfall_threshold_mmhr, var_name=t.rainfall_var_name,
         )
-        if int(event_dict["longest_duration"]) < cfg.selection.min_duration_steps:
+        if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
             raise RuntimeError(
                 f"{name}: longest duration {event_dict['longest_duration']} "
-                f"< min_duration_steps={cfg.selection.min_duration_steps}"
+                f"< min_duration_hr={cfg.selection.min_duration_hr}"
             )
         continuos_storm(event_dict)
         storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
@@ -377,7 +380,7 @@ def track_one_event(cfg: Config, storm: str):
         ds.close()
 
     traj = compute_storm_trajectory(
-        event_dict, cfg.motion.intensity_window, storm_id=_parse_storm_id(name, 0)
+        event_dict, cfg.motion.intensity_window_hr, storm_id=_parse_storm_id(name, 0)
     )
     if traj is None:
         raise RuntimeError(f"{name}: no valid trajectory (>= 2 centroids)")
@@ -398,7 +401,7 @@ def generate_event_diagnostics(cfg: Config, storm: str, verbose: bool = True) ->
         storm_trajectories=trajectories, save_path=str(paths["storm_track"]),
     )
 
-    interval = cfg.motion.intensity_window
+    interval = cfg.motion.intensity_window_hr
     if interval in _TIME_STEP_WINDOWS:
         st = trajectories[name]["start_time_index"]
         en = trajectories[name]["end_time_index"]
@@ -408,7 +411,7 @@ def generate_event_diagnostics(cfg: Config, storm: str, verbose: bool = True) ->
             save_path=str(paths["storm_time_steps"]), font_size=cfg.figure.font_size,
         )
     elif verbose:
-        print(f"note: storm_interval {interval!r} not in {sorted(_TIME_STEP_WINDOWS)}; "
+        print(f"note: intensity_window_hr {interval!r} not in {sorted(_TIME_STEP_WINDOWS)}; "
               "skipping the time-step panel figure")
 
     n = name.split("_storm_")[1].split("_")[0] if "_storm_" in name else "0"
@@ -461,10 +464,10 @@ def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
     from .plotting.per_event import plot_storm_track, plot_storm_time_steps
 
     paths = scio.ensure_output_dirs(cfg)
-    interval = cfg.motion.intensity_window
+    interval = cfg.motion.intensity_window_hr
     do_steps = interval in _TIME_STEP_WINDOWS
     if not do_steps and verbose:
-        print(f"note: intensity_window {interval!r} not in {sorted(_TIME_STEP_WINDOWS)}; "
+        print(f"note: intensity_window_hr {interval!r} not in {sorted(_TIME_STEP_WINDOWS)}; "
               "drawing storm-track figures only (no time-step panels)")
 
     trajectories = summary.storm_trajectories

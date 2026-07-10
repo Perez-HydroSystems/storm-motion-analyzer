@@ -41,7 +41,7 @@ The package was migrated from a flat `functions/` folder; the old orchestration 
 
 ## Pipeline (pipeline.py) — the call path
 1. `run_catalog_tracking(cfg)` → loops `io.discover_events`; per event:
-   `tracking.dataset.storm_tracking_event` → skip if `longest_duration < min_duration_steps`
+   `tracking.dataset.storm_tracking_event` → skip if `longest_duration < min_duration_hr`
    → `continuos_storm` → `storm_tracking_features`. Returns `{event_name: event_dict}`.
 2. `summarize_motion(results, cfg)` → per storm: most-intense window
    (`motion.direction.mean_precipitation_within_ellipse` + `get_max_accumulated_value`),
@@ -63,16 +63,16 @@ Sections:
 - `io`: catalog_dir, transposition_domain_path, control_area_path?, grid_path?, output_dir,
   domain_name, max_events?
 - `tracking`: rainfall_var_name, morph_radius_cells, rainfall_threshold_mmhr,
-  ellipse_fit_method∈{moments,contour}, overlap_ratio_threshold, dry_spell_steps
-- `selection`: min_duration_steps, min_area_fraction
-- `motion`: intensity_window (e.g. "12H"), n_trajectories_plotted
+  ellipse_fit_method∈{moments,contour}, overlap_ratio_threshold, dry_spell_hr
+- `selection`: min_duration_hr, min_area_fraction
+- `motion`: intensity_window_hr (int hours, e.g. 12), n_trajectories_plotted
 - `figure`: font_size, dpi, smooth_factor, arrow_scale, arrow_width, head_width, head_length
 - `direction_grid`: n_sectors, cell_size_km, count_threshold, start_angle_deg — for the
   storm-motion direction-probability diagnostic (`pipeline.build_direction_probability_field`
   + `plotting.motion_grid.plot_direction_probability_summary`; panel (c)/wheel adapt to n_sectors)
 
 Paths resolve relative to `project_root`; **no absolute paths in committed code/configs**.
-(overlap_ratio_threshold, dry_spell_steps, min_area_fraction are config-only for now — the
+(overlap_ratio_threshold, dry_spell_hr, min_area_fraction are config-only for now — the
 low-level tracking functions still use their internal defaults.)
 
 ## Input data
@@ -96,7 +96,9 @@ CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
   it's optional now (`grid_path: null`) and skipped via `_annotate_conus_grid` when absent.
 - Diagnostic plot functions hardcode `savefig(dpi=300)` and take `save_path` as a **string**
   (they do `save_path + "/..."`), so pass `str(dir)`.
-- Benign warnings: pandas `'H'`→`'h'` deprecation (intensity_window), cartopy/tight_layout notes.
+- `intensity_window_hr` is an int (hours); the pipeline converts it via `pd.to_timedelta(n, unit="h")`
+  (no more pandas `'H'` deprecation). `_TIME_STEP_WINDOWS`/`plot_storm_time_steps` keys are ints {6,8,12,16,24}.
+- Benign warnings: cartopy/tight_layout notes.
 - Grid modules: `motion/grid.py` = compute; `plotting/motion_grid.py` = the grid plot functions.
 
 ## Git / workflow

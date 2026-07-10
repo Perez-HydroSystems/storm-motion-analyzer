@@ -8,9 +8,9 @@ JSON layout (see ``configs/testing_data.json``)::
     {
       "project_root": ".",            # paths below resolve relative to this
       "io":        { "catalog_dir": ..., "transposition_domain_path": ..., ... },
-      "tracking":  { "var_name": "rain", "morph_radius": 2, ... },
-      "selection": { "min_duration_steps": 6, "area_portion_threshold": 0.05 },
-      "motion":    { "storm_interval": "12H", "top_n_trajectories": 100 },
+      "tracking":  { "rainfall_var_name": "rain", "morph_radius_cells": 2, ... },
+      "selection": { "min_duration_hr": 6, "min_area_fraction": 0.05 },
+      "motion":    { "intensity_window_hr": 12, "n_trajectories_plotted": 100 },
       "figure":    { "font_size": 0, "dpi": 300, "smooth_factor": 0.05 }
     }
 """
@@ -40,18 +40,18 @@ class TrackingConfig:
     rainfall_threshold_mmhr: float = 0.5     # rain-rate threshold for identification (mm/hr)
     ellipse_fit_method: str = "moments"      # "moments" | "contour"
     overlap_ratio_threshold: float = 0.2     # storm-overlap ratio to link across time (fraction)
-    dry_spell_steps: int = 0                 # allowed gap when matching storms (time steps)
+    dry_spell_hr: int = 0                     # allowed gap when matching storms (hours)
 
 
 @dataclass
 class SelectionConfig:
-    min_duration_steps: int = 6              # drop storms shorter than this (time steps)
+    min_duration_hr: int = 6                 # drop storms shorter than this (hours)
     min_area_fraction: float = 0.05          # storm must cover >= this fraction of the domain
 
 
 @dataclass
 class MotionConfig:
-    intensity_window: str = "12H"            # window for the most-intense period (e.g. "12H")
+    intensity_window_hr: int = 12            # window for the most-intense period (hours)
     n_trajectories_plotted: int = 100        # number of trajectories drawn on the map
 
 
@@ -132,6 +132,12 @@ class Config:
             errors.append("selection.min_area_fraction must be in (0, 1)")
         if self.motion.n_trajectories_plotted <= 0:
             errors.append("motion.n_trajectories_plotted must be > 0")
+        if self.motion.intensity_window_hr <= 0:
+            errors.append("motion.intensity_window_hr must be > 0")
+        if self.selection.min_duration_hr <= 0:
+            errors.append("selection.min_duration_hr must be > 0")
+        if self.tracking.dry_spell_hr < 0:
+            errors.append("tracking.dry_spell_hr must be >= 0")
         if self.direction_grid.n_sectors < 2:
             errors.append("direction_grid.n_sectors must be >= 2")
         if self.direction_grid.cell_size_km <= 0:

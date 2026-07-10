@@ -41,7 +41,7 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     - mean_angle (float): Mean storm direction angle.
     - mean_vel (float): Mean storm velocity.
     - mean_p_ellipse (array): Mean precipitation within the ellipse.
-    - time_window (str): Time window for storm duration.
+    - time_window (int): Most-intense-window length in hours.
     """
     # Structured layout to avoid axes/text overlapping
     fig = plt.figure(figsize=(16, 10))
@@ -52,7 +52,7 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     # Main trajectories map spans both rows of the first column
     ax1 = fig.add_subplot(gs[:, 0], projection=ccrs.PlateCarree())
     ax1.set_title(
-        f'Storm Trajectories (Storm duration: {time_window})\nStorm events: {len(longest_trajectories)}',
+        f'Storm Trajectories (Storm duration: {time_window} h)\nStorm events: {len(longest_trajectories)}',
         fontsize=font_size + 14
     )
 
@@ -223,7 +223,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
     )
     ax1 = fig.add_subplot(gs[:, 0], projection=ccrs.PlateCarree())
     ax1.set_title(
-        f'Storm Mean Direction Vectors (Storm duration: {time_window})\nStorm events: {len(longest_trajectories)}',
+        f'Storm Mean Direction Vectors (Storm duration: {time_window} h)\nStorm events: {len(longest_trajectories)}',
         fontsize=font_size + 14
     )
 

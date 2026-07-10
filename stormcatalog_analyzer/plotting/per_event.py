@@ -29,14 +29,14 @@ def plot_storm_time_steps(storm_tracking_results, storm_name, start_end, time_wi
 
     Parameters:
     - event_dict (dict): Dictionary containing storm data.
-    - time_window (str): String of the selected time window for the trajectory.
+    - time_window (int): Selected time-window length in hours (6, 8, 12, 16, or 24).
     - start_end (tuple): Indexes values of the start and end time step of the most intensive time window
     """
     # Get the event dictionary for the specified storm name
     event_dict = storm_tracking_results[storm_name]
-    
-    # Get the shape of the figure using the time window
-    time_window_options = ['6H', '8H', '12H', '16H', '24H']
+
+    # Get the shape of the figure using the time window (hours)
+    time_window_options = [6, 8, 12, 16, 24]
     fig_shape = [(2,3), (3,3), (3,4), (4,4), (4,4)]  # shape of the figure
     dict_shape = dict(zip(time_window_options, fig_shape))  # dictionary of the shape
     
@@ -113,7 +113,7 @@ def plot_storm_time_steps(storm_tracking_results, storm_name, start_end, time_wi
         "Parameters:\n"
         f"Morph radius: {morph_radius}, "
         f"High threshold: {high_threshold} mm/h, "
-        f"Time window: {time_window}"
+        f"Time window: {time_window} h"
     )
     fig.text(
         0.5,
