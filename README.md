@@ -14,14 +14,18 @@ It works with storm catalogs from storm generators or rainfall datasets — crea
  
 ## Quick start
  
-**Prerequisites:** Python 3.7+, NetCDF4, and the standard scientific Python stack (NumPy, SciPy, Matplotlib, Pandas).
+**Prerequisites:** Python 3.9+ and the scientific + geospatial Python stack (NumPy, SciPy, pandas, xarray, netCDF4, scikit-image, geopandas, shapely, cartopy, pyproj, matplotlib, seaborn, windrose).
+
+> **Install the dependencies before using the repo.** The recommended way is a conda environment from [`environment.yml`](environment.yml), which pulls the geospatial stack (cartopy, geopandas, pyproj) cleanly from conda-forge. A `pip install -r requirements.txt` also works if you already have the system GDAL/GEOS/PROJ libraries.
  
 ```bash
 git clone https://github.com/Perez-HydroSystems/storm-motion-analyzer.git
 cd storm-motion-analyzer
  
-pip install -r requirements.txt
-pip install -e .          # optional: enables the `stormcatalog-analyzer` CLI
+conda env create -f environment.yml      # create the env with all dependencies
+conda activate storm-motion-analyzer
+
+pip install -e .                         # optional: enables the `stormcatalog-analyzer` CLI
 ```
  
 You need two things to run an analysis: a storm event or a storm catalog (a folder of NetCDF events) and a JSON config. All inputs, paths, and model parameters live in one config file — see [`configs/testing_data.json`](configs/testing_data.json).

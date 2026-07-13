@@ -1,0 +1,42 @@
+# Conda environment for Storm Motion Analyzer.
+#
+# Create it (once):   conda env create -f environment.yml
+# Activate it:        conda activate storm-motion-analyzer
+# Update it later:    conda env update -f environment.yml --prune
+#
+# conda-forge carries the geospatial stack (cartopy, geopandas, pyproj, shapely, gdal),
+# which is much easier to install this way than with pip.
+name: storm-motion-analyzer
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  # scientific core
+  - numpy
+  - pandas
+  - scipy
+  # gridded (NetCDF) data I/O
+  - xarray
+  - netcdf4
+  # image processing / storm identification
+  - scikit-image
+  - opencv
+  # geospatial
+  - pyproj
+  - geographiclib
+  - geopandas
+  - shapely
+  - cartopy
+  # plotting
+  - matplotlib
+  - seaborn
+  - imageio
+  - pillow
+  # notebooks
+  - jupyterlab
+  - ipykernel
+  # pure-Python packages installed via pip
+  - pip
+  - pip:
+      - mpu
+      - windrose
