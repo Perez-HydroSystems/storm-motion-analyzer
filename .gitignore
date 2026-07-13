@@ -1,5 +1,7 @@
-# Test data / large catalogs (provide your own; see configs/)
-testing_data/
+# Test data: track the demo input catalog, ignore regenerable pipeline outputs
+testing_data/*
+!testing_data/StormCatalog/
+!testing_data/TranspositionDomain/
 
 # Generated outputs
 frames/
@@ -19,8 +21,9 @@ dist/
 .DS_Store
 *.swp
 
-# Claude Code (local settings; CLAUDE.md stays tracked)
+# Claude Code (local settings + guidance file)
 .claude/
+CLAUDE.md
 
 # Environments
 .venv/
