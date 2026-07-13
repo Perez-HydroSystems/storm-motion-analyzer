@@ -8,7 +8,7 @@ Storm detection and tracking toolkit for characterizing storm motion from hourly
  
 Storm Motion Analyzer detects storm centers within NetCDF gridded rainfall data, tracks their trajectories over time (Lagrangian tracking), and characterizes their motion, intensity, and spatial extent. It supports the research described in *"Mapping the Motion of Historical Extreme Rainfall Events Across CONUS: A Dataset on Storm Tracks, Speed, and Structure"* (Osorio-Giraldo, Perez, Wright, and Liu).
  
-It works with storm catalogs from storm generators or rainfall datasets — for example, the catalogs produced by [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay).
+It works with storm catalogs from storm generators or rainfall datasets — created to proccess the storms catalogs produced by [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay).
 
 ![Storm tracking demo](storm_tracking_process.gif)
  
@@ -65,15 +65,16 @@ Written to `<output_dir>/<domain_name>/`:
  
 | Notebook | Purpose |
 |---|---|
-| [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) | Main — catalog in, full diagnostic-plot set + per-event figures out. |
-| [`notebooks/storm_motion_event.ipynb`](notebooks/storm_motion_event.ipynb) | Per-event spatiotemporal evolution + fitted ellipse. |
+| [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) | Process all the events in the storm catalog, generating the summary and individual diagnostic plots. |
+| [`notebooks/storm_motion_event.ipynb`](notebooks/storm_motion_event.ipynb) | Per-event spatiotemporal plots a tracking results. |
 | `notebooks/legacy/` | Older exploratory notebooks (unmaintained). |
  
 ## What it extracts
  
-- **Motion** — trajectory, translation speed, direction, temporal evolution of storm paths.
-- **Intensity** — peak and mean rainfall intensity, spatial distribution, temporal patterns.
-- **Spatial extent** — storm area coverage, shape evolution, regional coverage, areal rainfall distributions.
+- **Motion** — trajectory, translation speed, direction, spatial probability of direction motion.
+- **Intensity** — peak and mean rainfall intensity for each storms.
+- **Spatial morphology** — storm area coverage, ellipse area and dimensions.
+
 
  
 

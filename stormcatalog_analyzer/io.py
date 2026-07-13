@@ -11,17 +11,31 @@ from typing import List, Optional
 from .config import Config
 
 
-def discover_events(cfg: Config) -> List[Path]:
-    """Return the sorted list of ``.nc`` storm-event files in the catalog dir.
+def _storm_id(path: Path) -> int:
+    """Storm id from a RainyDay filename (``..._storm_<id>_...``); -1 if absent."""
+    try:
+        return int(path.name.split("_storm_")[1].split("_")[0])
+    except (IndexError, ValueError):
+        return -1
 
-    Truncated to ``io.max_events`` when set (the user's "number of events" input).
+
+def discover_events(cfg: Config) -> List[Path]:
+    """Return the ``.nc`` storm-event files in the catalog dir.
+
+    When ``io.max_events`` is set, keep only the N **most intense** events, ranked
+    by the storm id in the filename (``..._storm_<id>_...``): a higher id means a
+    more intense event, so e.g. ``..._storm_400_...`` outranks ``..._storm_399_...``.
+    Files without a parseable id (id = -1) rank lowest. The selection is returned
+    sorted by name, matching the full (untruncated) ordering.
     """
     catalog = cfg.catalog_dir
     events = sorted(p for p in catalog.glob("*.nc") if p.is_file())
     if not events:
         raise FileNotFoundError(f"No .nc storm events found in {catalog}")
     if cfg.io.max_events is not None:
-        events = events[: cfg.io.max_events]
+        # keep the N highest storm ids (most intense), then restore name order
+        most_intense = sorted(events, key=_storm_id, reverse=True)[: cfg.io.max_events]
+        events = sorted(most_intense)
     return events
 
 

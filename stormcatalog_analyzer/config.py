@@ -30,7 +30,7 @@ class IOConfig:
     grid_path: Optional[str] = None  # CONUS 5x5 reference grid (optional inset)
     output_dir: str = "outputs"
     domain_name: str = "Domain"
-    max_events: Optional[int] = None  # process only the first N catalog events (None = all)
+    max_events: Optional[int] = None  # process only the N most intense events by storm id (None = all)
 
 
 @dataclass

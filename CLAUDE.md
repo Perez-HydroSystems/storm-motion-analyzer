@@ -118,7 +118,8 @@ CRS WGS84. RainyDay catalog filenames `<catalog>_storm_<id>_<date>.nc`.
   Saved to `<output_dir>/<domain>/StormAnimation/`. Needs Pillow (PillowWriter). Reads motion metrics
   (`mean_direction_weighted`/`mean_velocity`/`var_dir_weighted`) off the event_dict — present because
   `compute_storm_trajectory` writes them there.
-- `--max-events N` (general flag) / `io.max_events` subsamples the catalog to the first N events.
+- `--max-events N` (general flag) / `io.max_events` subsamples the catalog to the N **most intense**
+  events, ranked by the storm id in the filename (`..._storm_<id>_...`; higher id = more intense).
 
 ## Notebooks
 - `storm_motion_catalog.ipynb` (root) — catalog diagnostics + a cell for all per-event figures,
