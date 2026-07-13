@@ -36,7 +36,7 @@ python run_diagnostics.py event --config configs/testing_data.json --storm 100
  
 If installed with `pip install -e .`, the same commands are available as `stormcatalog-analyzer diagnostics|event ...`.
  
-Prefer a notebook? Open [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) — it loads the config and runs the same pipeline.
+Prefer a notebook? Open [`notebooks/storm_motion_catalog.ipynb`](notebooks/storm_motion_catalog.ipynb) — it loads the config and runs the same pipeline.
  
 ## Usage
  
@@ -65,9 +65,8 @@ Written to `<output_dir>/<domain_name>/`:
  
 | Notebook | Purpose |
 |---|---|
-| [`storm_motion_catalog.ipynb`](storm_motion_catalog.ipynb) | Process all the events in the storm catalog, generating the summary and individual diagnostic plots. |
+| [`notebooks/storm_motion_catalog.ipynb`](notebooks/storm_motion_catalog.ipynb) | Process all the events in the storm catalog, generating the summary and individual diagnostic plots. |
 | [`notebooks/storm_motion_event.ipynb`](notebooks/storm_motion_event.ipynb) | Per-event spatiotemporal plots a tracking results. |
-| `notebooks/legacy/` | Older exploratory notebooks (unmaintained). |
  
 ## What it extracts
  
