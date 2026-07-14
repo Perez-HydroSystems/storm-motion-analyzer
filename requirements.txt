@@ -11,9 +11,10 @@ pyproj
 geographiclib
 mpu
 geopandas
-shapely
+shapely>=2.0,<2.1   # 2.1 tightened LinearRing validation and breaks cartopy's gridline labels
 cartopy
-matplotlib
+matplotlib<3.11     # cartopy stack is version-sensitive; cap to a tested-compatible range
 seaborn
 windrose
 imageio
+setuptools<81       # 81 drops pkg_resources, which mpu still imports at runtime

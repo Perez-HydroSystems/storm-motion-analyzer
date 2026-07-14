@@ -11,6 +11,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
+  - setuptools<81   # 81 drops pkg_resources, which mpu still imports at runtime
   # scientific core
   - numpy
   - pandas
@@ -25,10 +26,10 @@ dependencies:
   - pyproj
   - geographiclib
   - geopandas
-  - shapely
+  - shapely>=2.0,<2.1   # 2.1 tightened LinearRing validation and breaks cartopy's gridline labels
   - cartopy
   # plotting
-  - matplotlib
+  - matplotlib<3.11   # cartopy stack is version-sensitive; cap to a tested-compatible range
   - seaborn
   - imageio
   - pillow

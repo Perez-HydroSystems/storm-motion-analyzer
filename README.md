@@ -17,6 +17,8 @@ It works with storm catalogs from storm generators or rainfall datasets — crea
 **Prerequisites:** Python 3.9+ and the scientific + geospatial Python stack (NumPy, SciPy, pandas, xarray, netCDF4, scikit-image, geopandas, shapely, cartopy, pyproj, matplotlib, seaborn, windrose).
 
 > **Install the dependencies before using the repo.** The recommended way is a conda environment from [`environment.yml`](environment.yml), which pulls the geospatial stack (cartopy, geopandas, pyproj) cleanly from conda-forge. A `pip install -r requirements.txt` also works if you already have the system GDAL/GEOS/PROJ libraries.
+>
+> **Troubleshooting:** if saving a figure raises `GEOSException: ... Points of LinearRing do not form a closed linestring`, your `shapely` is ≥ 2.1 (it tightened ring validation and breaks cartopy's gridline labels) — pin it with `pip install "shapely<2.1"`.
  
 ```bash
 git clone https://github.com/Perez-HydroSystems/storm-motion-analyzer.git
