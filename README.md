@@ -1,6 +1,7 @@
 # Storm Motion Analyzer
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21382060.svg)](https://doi.org/10.5281/zenodo.21382060)
  
 Storm detection and tracking toolkit for characterizing storm motion (trajectory, direction, speed, and angular variance) from hourly gridded rainfall data.
  
@@ -95,9 +96,9 @@ Written to `<output_dir>/<domain_name>/`:
 
 If you use this software, please cite it — GitHub's "Cite this repository" button (generated from [`CITATION.cff`](CITATION.cff)) gives ready-made BibTeX/APA entries:
 
-> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.0.0) [Computer software]. https://github.com/Perez-HydroSystems/storm-motion-analyzer
+> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21382061
 
-<!-- Zenodo DOI badge and DOI-based citation will be added here once the v1.0.0 release is archived on Zenodo. -->
+To cite all versions of the software, use the concept DOI [10.5281/zenodo.21382060](https://doi.org/10.5281/zenodo.21382060), which always resolves to the latest release.
 
 ## License
  

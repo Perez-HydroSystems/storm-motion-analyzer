@@ -20,6 +20,14 @@ authors:
     affiliation: "School of Civil and Environmental Engineering, Oklahoma State University"
 version: "1.0.0"
 date-released: "2026-07-15"
+doi: "10.5281/zenodo.21382061"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21382060"
+    description: "Concept DOI for all versions; resolves to the latest release."
+  - type: doi
+    value: "10.5281/zenodo.21382061"
+    description: "Version DOI for v1.0.0."
 license: MIT
 repository-code: "https://github.com/Perez-HydroSystems/storm-motion-analyzer"
 keywords:
