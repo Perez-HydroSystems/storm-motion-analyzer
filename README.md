@@ -2,13 +2,13 @@
 [![Python](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
  
-Storm detection and tracking toolkit for characterizing storm motion from hourly gridded rainfall data. 
+Storm detection and tracking toolkit for characterizing storm motion (trajectory, direction, speed, and angular variance) from hourly gridded rainfall data.
  
 ## Tool description
  
-Storm Motion Analyzer detects storm centers within NetCDF gridded rainfall data, tracks their trajectories over time (Lagrangian tracking), and characterizes their motion, intensity, and spatial extent. It supports the research described in *"Mapping the Motion of Historical Extreme Rainfall Events Across CONUS: A Dataset on Storm Tracks, Speed, and Structure"* (Osorio-Giraldo, Perez, Wright, and Liu).
+Storm-Motion-Analyzer detects storms in NetCDF gridded rainfall data using rainfall thresholding, connected-component labeling, and morphological operations (dilation/erosion), tracks them through time with overlap-based Lagrangian tracking, and characterizes their motion (trajectory, direction, speed, and angular variance), intensity, and spatial extent via moment-based ellipse fitting.
  
-It works with storm catalogs from storm generators or rainfall datasets — created to proccess the storms catalogs produced by [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay).
+The package is designed primarily to process the output storm catalogs produced by the [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay) stochastic storm transposition framework, but it works with any hourly gridded NetCDF rainfall dataset. The toolkit has been tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data.
 
 ![Storm tracking demo](storm_tracking_process.gif)
  
@@ -53,7 +53,7 @@ from stormcatalog_analyzer.config import load_config
 from stormcatalog_analyzer import pipeline
  
 cfg = load_config("configs/testing_data.json")
-cfg.tracking.rainfall_threshold_mmhr = 0.5   # optional inline overrides
+cfg.tracking.rainfall_threshold_mmhr = 2   # optional inline overrides
  
 out = pipeline.run(cfg)                # track -> summarize -> diagnostics
 out["summary"].storm_properties.head()
@@ -85,10 +85,11 @@ Written to `<output_dir>/<domain_name>/`:
 
 ## Authors
  
-- Diego F. Osorio-Giraldo, Gabriel Perez — School of Civil and Environmental Engineering, Oklahoma State University
+- Diego F. Osorio-Giraldo — School of Civil and Environmental Engineering, Oklahoma State University
+- Gabriel Perez — School of Civil and Environmental Engineering, Oklahoma State University
 
-
- 
+# Acknowledgements
+- Yuan Liu — provided seminal functions for the storm tracking algorithm.
 
  
 ## License
