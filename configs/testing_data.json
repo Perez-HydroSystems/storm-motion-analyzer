@@ -12,7 +12,7 @@
   "tracking": {
     "rainfall_var_name": "rain",
     "morph_radius_cells": 2,
-    "rainfall_threshold_mmhr": 0.5,
+    "rainfall_threshold_mmhr": 2,
     "ellipse_fit_method": "moments",
     "overlap_ratio_threshold": 0.2,
     "dry_spell_hr": 0
