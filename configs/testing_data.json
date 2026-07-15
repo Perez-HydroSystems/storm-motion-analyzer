@@ -2,7 +2,7 @@
   "project_root": ".",
   "io": {
     "catalog_dir": "testing_data/StormCatalog",
-    "transposition_domain_path": "testing_data/TranspositionDomain/Domain_22.shp",
+    "transposition_domain_path": "testing_data/TranspositionDomain/Domain_58.shp",
     "control_area_path": null,
     "grid_path": null,
     "output_dir": "testing_data",
