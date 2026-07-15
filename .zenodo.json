@@ -1,0 +1,36 @@
+{
+  "title": "Storm Motion Analyzer",
+  "upload_type": "software",
+  "description": "Storm detection and tracking toolkit for characterizing storm motion (trajectory, direction, speed, and angular variance) from hourly gridded rainfall data. It detects storms in NetCDF gridded rainfall data using rainfall thresholding, connected-component labeling, and morphological operations, tracks them through time with overlap-based Lagrangian tracking, and characterizes their motion, intensity, and spatial extent via moment-based ellipse fitting. Designed primarily to process the output storm catalogs produced by the RainyDay stochastic storm transposition framework, and tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data.",
+  "creators": [
+    {
+      "name": "Osorio-Giraldo, Diego F.",
+      "orcid": "0009-0007-1704-8456",
+      "affiliation": "School of Civil and Environmental Engineering, Oklahoma State University"
+    },
+    {
+      "name": "Perez, Gabriel",
+      "orcid": "0000-0003-3880-0874",
+      "affiliation": "School of Civil and Environmental Engineering, Oklahoma State University"
+    }
+  ],
+  "license": "MIT",
+  "keywords": [
+    "storm tracking",
+    "storm motion",
+    "rainfall",
+    "precipitation",
+    "RainyDay",
+    "stochastic storm transposition",
+    "AORC",
+    "hydrology",
+    "hydrometeorology"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Perez-HydroSystems/storm-motion-analyzer",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
