@@ -106,9 +106,9 @@ def animate_storm_tracking(
     ell_a = record["ellipse_angle (degree)"].to_numpy()
 
     # motion statistics (written onto the event_dict by compute_storm_trajectory)
-    wd = float(event.get("mean_direction_weighted", np.nan))
+    wd = float(event.get("mean_bearing", np.nan))  # compass deg, direction of motion
     speed = float(event.get("mean_velocity", np.nan))
-    ang_var = float(event.get("var_dir_weighted", np.nan))
+    ang_var = float(event.get("var_bearing", np.nan))
     mean_p = float(traj.get("mean_precipitation", np.nan))
     traj_len_deg = float(traj.get("trajectory_length", np.nan)) / _M_PER_DEG
 
@@ -121,9 +121,12 @@ def animate_storm_tracking(
 
     # mean-direction vector, centred on the trajectory midpoint
     xa, ya = float(np.mean(lon[steps])), float(np.mean(lat[steps]))
+    # bearing -> unit vector in lon/lat degree space (lon degrees shrink by cos(lat))
     theta = np.radians(wd) if np.isfinite(wd) else 0.0
-    vec_u = np.cos(theta) * traj_len_deg if np.isfinite(traj_len_deg) else 0.0
-    vec_v = np.sin(theta) * traj_len_deg if np.isfinite(traj_len_deg) else 0.0
+    ux, uy = np.sin(theta) / np.cos(np.radians(ya)), np.cos(theta)
+    unit = np.hypot(ux, uy)
+    vec_u = ux / unit * traj_len_deg if np.isfinite(traj_len_deg) else 0.0
+    vec_v = uy / unit * traj_len_deg if np.isfinite(traj_len_deg) else 0.0
 
     # map extent: storm footprint + centroid path + the mean-direction arrow
     acc = np.nansum(selected[win], axis=0)
@@ -206,7 +209,7 @@ def animate_storm_tracking(
             )
             # variable names in bold (mathtext), values in normal weight
             stats = "\n".join([
-                r"$\mathbf{Direction}$: " + f"{wd:.1f}°",
+                r"$\mathbf{Direction}$: " + f"{(90.0 - wd) % 360:.1f}° CCW from E",
                 r"$\mathbf{Speed}$: " + f"{speed:.2f} m/s",
                 r"$\mathbf{Rain\ intensity}$: " + f"{mean_p:.2f} mm/h",
                 r"$\mathbf{Angular\ variance}$: " + f"{ang_var:.2f}",

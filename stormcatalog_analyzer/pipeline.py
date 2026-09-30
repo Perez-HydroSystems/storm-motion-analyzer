@@ -34,6 +34,11 @@ from .motion.direction import (
     mean_direction,
     mean_direction_weighted,
     mean_direction_ln,
+    mean_bearing,
+    endpoint_bearing,
+    bearing_to_math,
+    line_length_geodesic,
+    mean_speed_geodesic,
 )
 
 # Projected (EPSG:2163) -> geographic (EPSG:4326)
@@ -92,9 +97,9 @@ class MotionSummary:
     storm_properties: pd.DataFrame
     df: pd.DataFrame
     longest_trajectories: dict
-    storm_mean_direction_weighted: list
+    storm_mean_bearing: list          # per-storm geodesic mean bearing (compass deg)
     storm_mean_velocity: list
-    mean_angle: float
+    mean_angle: float                 # catalog circular mean direction (deg CCW from E)
     mean_vel: float
     mean_p: float
 
@@ -117,16 +122,30 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
 
     x = storm["storm_prj_lon_cent_list"][start_idx:end_idx]
     y = storm["storm_prj_lat_cent_list"][start_idx:end_idx]
+    lon = np.asarray(storm["storm_lon_cent"][start_idx:end_idx], dtype=float)
+    lat = np.asarray(storm["storm_lat_cent"][start_idx:end_idx], dtype=float)
     if len(x) < 2:
         return None
 
-    v = mean_velocity(x, y)
+    # motion metrics: geodesic on WGS84, relative to true north. Computed as compass
+    # bearings of the direction of motion (0 = N, clockwise); reported as degrees
+    # counterclockwise from east (0 = E, 90 = N)
+    v = mean_speed_geodesic(lon, lat)
+    bearing, bearing_var = mean_bearing(lon, lat, weighted=True)
+    bearing_unw, _ = mean_bearing(lon, lat, weighted=False)
+    bearing_ep = endpoint_bearing(lon, lat)
+
+    # legacy projected-plane metrics (EPSG:2163 grid; math convention 0 = E, CCW),
+    # kept for comparison. Grid north differs from true north away from 100 W.
     d, vd = mean_direction(x, y)
     wd, wv = mean_direction_weighted(x, y)
     lm = mean_direction_ln(x, y)[0]
 
     # metrics needed by per-event plots live on the event_dict
     storm["mean_velocity"] = v
+    storm["mean_bearing"] = bearing
+    storm["var_bearing"] = bearing_var
+    storm["endpoint_bearing"] = bearing_ep
     storm["mean_direction"] = d
     storm["var_direction"] = vd
     storm["mean_direction_ln"] = lm
@@ -143,7 +162,7 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
     times = storm["selected_storm_time_steps"]
 
     mean_precip = float(np.mean(mean_p_ellipse[win]))
-    trajectory_length_m = compute_line_length(x, y)
+    trajectory_length_m = line_length_geodesic(lon, lat)
     return {
         "start_time_index": start_idx,
         "end_time_index": end_idx,
@@ -151,10 +170,13 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
         "y_coords": y,
         "trajectory_length": trajectory_length_m,
         "mean_precipitation": mean_precip,
-        "angular_variance": wv,
+        "mean_bearing": bearing,
+        "angular_variance": bearing_var,
         "storm_id": storm_id,
         "_metrics": {
-            "v": v, "d": d, "wd": wd, "wv": wv,
+            "v": v, "bearing": bearing, "bearing_unw": bearing_unw, "bearing_ep": bearing_ep,
+            "bearing_var": bearing_var, "wd_grid": wd, "wv_grid": wv,
+            "v_grid": mean_velocity(x, y), "length_grid_km": compute_line_length(x, y) / 1000.0,
             "area": float(np.mean(storm["selected_storm_area"][win])),
             "intensity": mean_precip,
             "peak_intensity": float(np.nanmax(max_p)) if max_p.size else float("nan"),
@@ -177,7 +199,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
 
     storm_trajectories: dict = {}
     storm_mean_velocity: list = []
-    storm_mean_direction_weighted: list = []
+    storm_mean_bearing: list = []
     storm_intensity: list = []
     property_rows: list = []
 
@@ -189,7 +211,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
         m = traj.pop("_metrics")
         storm_trajectories[name] = traj
         storm_mean_velocity.append(m["v"])
-        storm_mean_direction_weighted.append(m["wd"])
+        storm_mean_bearing.append(m["bearing"])
         storm_intensity.append(m["intensity"])
         property_rows.append({
             "storm_event": name,
@@ -198,9 +220,11 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
             "end_time": m["end_time"],
             "duration_hours": m["duration_hours"],
             "mean_speed_ms": m["v"],
-            "mean_direction_deg": m["wd"],
-            "mean_direction_vector_deg": m["d"],
-            "angular_variance": m["wv"],
+            # directions reported counterclockwise from east (0 = E, 90 = N)
+            "mean_direction_deg": float(bearing_to_math(m["bearing"])),
+            "mean_direction_vector_deg": float(bearing_to_math(m["bearing_unw"])),
+            "endpoint_direction_deg": float(bearing_to_math(m["bearing_ep"])),
+            "angular_variance": m["bearing_var"],
             "mean_intensity_mmh": m["intensity"],
             "peak_intensity_mmh": m["peak_intensity"],
             "total_rainfall_mm": m["total_rainfall"],
@@ -209,6 +233,11 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
             "mean_major_axis_km": m["major_km"],
             "mean_minor_axis_km": m["minor_km"],
             "mean_ellipse_angle_deg": m["ellipse_angle"],
+            # legacy EPSG:2163 grid-plane values (math convention), for comparison only
+            "mean_direction_grid_deg": m["wd_grid"] % 360.0,
+            "angular_variance_grid": m["wv_grid"],
+            "mean_speed_grid_ms": m["v_grid"],
+            "trajectory_length_grid_km": m["length_grid_km"],
         })
 
     if not storm_trajectories:
@@ -235,8 +264,8 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
             : cfg.motion.n_trajectories_plotted]
     )
 
-    wd_arr = np.radians(storm_mean_direction_weighted)
-    mean_angle = float(np.degrees(np.arctan2(np.mean(np.sin(wd_arr)), np.mean(np.cos(wd_arr)))))
+    b_arr = np.radians(storm_mean_bearing)
+    mean_angle = float(bearing_to_math(np.degrees(np.arctan2(np.mean(np.sin(b_arr)), np.mean(np.cos(b_arr))))))
     mean_vel = float(np.mean(storm_mean_velocity))
     mean_p = float(np.mean(storm_intensity))
 
@@ -246,7 +275,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
         storm_properties=storm_properties,
         df=df,
         longest_trajectories=longest_trajectories,
-        storm_mean_direction_weighted=storm_mean_direction_weighted,
+        storm_mean_bearing=storm_mean_bearing,
         storm_mean_velocity=storm_mean_velocity,
         mean_angle=mean_angle,
         mean_vel=mean_vel,
@@ -288,7 +317,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         longest_trajectories=summary.longest_trajectories,
         geographic_trajectories=summary.geographic_trajectories,
         transposition_domain=transposition_domain,
-        storm_mean_direction_vector=summary.storm_mean_direction_weighted,
+        storm_mean_direction_vector=summary.storm_mean_bearing,
         storm_mean_velocity=summary.storm_mean_velocity,
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,
@@ -307,7 +336,7 @@ def generate_catalog_diagnostics(summary: MotionSummary, cfg: Config) -> dict:
         longest_trajectories=summary.longest_trajectories,
         geographic_trajectories=summary.geographic_trajectories,
         transposition_domain=transposition_domain,
-        storm_mean_direction_vector=summary.storm_mean_direction_weighted,
+        storm_mean_direction_vector=summary.storm_mean_bearing,
         storm_mean_velocity=summary.storm_mean_velocity,
         mean_angle=summary.mean_angle,
         mean_vel=summary.mean_vel,

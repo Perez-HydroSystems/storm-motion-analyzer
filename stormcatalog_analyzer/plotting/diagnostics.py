@@ -18,10 +18,12 @@ import seaborn as sns
 from windrose import WindroseAxes
 from scipy import stats
 from scipy.interpolate import splprep, splev
-from pyproj import Transformer
+from pyproj import Transformer, Geod
 
 from ..motion.direction import compute_line_length
 from .helpers import _plot_geographic_outline, _annotate_conus_grid
+
+_GEOD = Geod(ellps="WGS84")
 
 def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_trajectories,  transposition_domain, 
                                        storm_mean_direction_vector, storm_mean_velocity, mean_angle, mean_vel, 
@@ -36,9 +38,10 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     - geographic_trajectories (dict): Dictionary of geographic trajectories.
     - wsh (GeoDataFrame): GeoDataFrame of the control area.
     - transposition_domain (GeoDataFrame): GeoDataFrame of the transposition domain.
-    - storm_mean_direction_vector (array): Array of storm mean direction vectors.
+    - storm_mean_direction_vector (array): Per-storm mean bearings (compass deg: 0 = N,
+      clockwise, direction of motion; geodesic on WGS84).
     - storm_mean_velocity (array): Array of storm mean velocities.
-    - mean_angle (float): Mean storm direction angle.
+    - mean_angle (float): Catalog mean direction (deg counterclockwise from east).
     - mean_vel (float): Mean storm velocity.
     - mean_p_ellipse (array): Mean precipitation within the ellipse.
     - time_window (int): Most-intense-window length in hours.
@@ -127,8 +130,7 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     # Create a smaller subplot for the wind rose plot
     rect_speed = gs[0, 1].get_position(fig).bounds
     ax2 = WindroseAxes.from_ax(fig=fig, rect=rect_speed, theta_labels=new_labels)
-    mean_dir = np.asarray(storm_mean_direction_vector) % 360
-    st_dir_vector = (90 - mean_dir) % 360 # Convert to meteorological convention
+    st_dir_vector = np.asarray(storm_mean_direction_vector) % 360  # compass bearings
     bins = np.arange(0, np.max(storm_mean_velocity), 5)
     ax2.bar(st_dir_vector, storm_mean_velocity, normed=True, bins=bins, cmap=plt.get_cmap("cool"))
     ax2.set_legend(title='Storm Speed (m/s)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
@@ -146,8 +148,7 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
     rect_intensity = gs[0, 2].get_position(fig).bounds
     ax2 = WindroseAxes.from_ax(fig=fig, rect=rect_intensity, theta_labels=new_labels)
     bins = np.linspace(0, df['mean_precipitation'].max(), 5)
-    mean_dir = np.asarray(storm_mean_direction_vector) % 360
-    st_dir_vector = (90 - mean_dir) % 360
+    st_dir_vector = np.asarray(storm_mean_direction_vector) % 360  # compass bearings
     ax2.bar(st_dir_vector, df['mean_precipitation'], normed=True, bins=bins, cmap=plt.get_cmap("jet"))
     ax2.set_legend(title='Intensity (mm/h)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
     ax2.legend_.get_title().set_horizontalalignment('center')
@@ -162,7 +163,7 @@ def diagnostic_plot_storm_trajectories(df, longest_trajectories, geographic_traj
         ax2.text(np.pi/2, r, f"{r:.0f}%", ha='left', va='bottom', fontsize = 9 + font_size)
         
     # Add a text box above the trajectories
-    mean_direction_text = f"Mean Storm Direction: {mean_angle:.2f}°"
+    mean_direction_text = f"Mean Storm Direction: {mean_angle:.2f}° CCW from E"
     mean_speed_text = f"Mean Storm Speed: {mean_vel:.2f} m/s"
     mean_precipitation_within_ellipse_text = f"Mean Storm Intensity: {mean_p_ellipse.mean():.2f} mm/h"
 
@@ -212,9 +213,10 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
     vector for each storm. The vector magnitude equals the distance between the first
     and last centroid in the trajectory.
 
-    Parameters mirror diagnostic_plot_storm_trajectories. Mean directions are taken from
-    `storm_mean_direction_vector` (aligned to df.index) or, if lengths mismatch, from
-    df columns 'mean_direction_weighted'/'mean_direction' when available.
+    Parameters mirror diagnostic_plot_storm_trajectories. Mean bearings (compass deg)
+    are taken from `storm_mean_direction_vector` (aligned to df.index) or, if lengths
+    mismatch, from the df column 'mean_bearing' when available. Each arrow is drawn
+    along the geodesic that leaves the first centroid at the mean bearing.
     """
     fig = plt.figure(figsize=(16, 10))
     gs = gridspec.GridSpec(
@@ -256,7 +258,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
     if storm_mean_direction_vector is not None and len(storm_mean_direction_vector) == len(df.index):
         direction_lookup = dict(zip(df.index, np.asarray(storm_mean_direction_vector)))
     if not direction_lookup:
-        for col in ('mean_direction_weighted', 'mean_direction'):
+        for col in ('mean_bearing',):
             if col in df.columns:
                 direction_lookup = df[col].to_dict()
                 break
@@ -267,7 +269,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
         y_coords = np.asarray(traj['lat_coords'])
         if x_coords.size < 2 or y_coords.size < 2:
             continue
-        traj_len = np.hypot(x_coords[-1] - x_coords[0], y_coords[-1] - y_coords[0])
+        _, _, traj_len = _GEOD.inv(x_coords[0], y_coords[0], x_coords[-1], y_coords[-1])
         if traj_len == 0:
             continue
         direction = direction_lookup.get(storm_event, np.nan)
@@ -280,9 +282,9 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
             color_value = df.loc[storm_event, 'angular_variance']
         
         color = cmap(norm(color_value))
-        theta = np.radians(direction % 360)
-        dx = np.cos(theta) * traj_len
-        dy = np.sin(theta) * traj_len
+        end_lon, end_lat, _ = _GEOD.fwd(x_coords[0], y_coords[0], direction % 360, traj_len)
+        dx = end_lon - x_coords[0]
+        dy = end_lat - y_coords[0]
         ax1.quiver(
             x_coords[0], y_coords[0], dx, dy,
             angles='xy', scale_units='xy', scale=arrow_scale, color=color,
@@ -308,8 +310,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
     new_labels = ["E", "N-E", "N", "N-W", "W", "S-W", "S", "S-E"]
     rect_speed = gs[0, 1].get_position(fig).bounds
     ax2 = WindroseAxes.from_ax(fig=fig, rect=rect_speed, theta_labels=new_labels)
-    mean_dir = np.asarray(storm_mean_direction_vector) % 360
-    st_dir_vector = (90 - mean_dir) % 360
+    st_dir_vector = np.asarray(storm_mean_direction_vector) % 360  # compass bearings
     bins = np.arange(0, np.max(storm_mean_velocity), 5)
     ax2.bar(st_dir_vector, storm_mean_velocity, normed=True, bins=bins, cmap=plt.get_cmap("cool"))
     ax2.set_legend(title='Storm Speed (m/s)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
@@ -322,8 +323,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
     rect_intensity = gs[0, 2].get_position(fig).bounds
     ax3 = WindroseAxes.from_ax(fig=fig, rect=rect_intensity, theta_labels=new_labels)
     bins = np.linspace(0, df['mean_precipitation'].max(), 5)
-    mean_dir = np.asarray(storm_mean_direction_vector) % 360
-    st_dir_vector = (90 - mean_dir) % 360
+    st_dir_vector = np.asarray(storm_mean_direction_vector) % 360  # compass bearings
     ax3.bar(st_dir_vector, df['mean_precipitation'], normed=True, bins=bins, cmap=plt.get_cmap("jet"))
     ax3.set_legend(title='Intensity (mm/h)', loc='upper center', bbox_to_anchor=(0.5, -0.15))
     ax3.legend_.get_title().set_horizontalalignment('center')
@@ -333,7 +333,7 @@ def diagnostic_plot_storm_direction_vectors(df, longest_trajectories, geographic
             continue
         ax3.text(np.pi/2, r, f"{r:.0f}%", ha='left', va='bottom', fontsize=9 + font_size)
 
-    mean_direction_text = f"Mean Storm Direction: {mean_angle:.2f}°"
+    mean_direction_text = f"Mean Storm Direction: {mean_angle:.2f}° CCW from E"
     mean_speed_text = f"Mean Storm Speed: {mean_vel:.2f} m/s"
     mean_precipitation_within_ellipse_text = f"Mean Storm Intensity: {mean_p_ellipse.mean():.2f} mm/h"
     mean_variance_text = f"Mean Angular Variance: {df['angular_variance'].mean():.2f}"
@@ -448,7 +448,7 @@ def plot_storm_trajectories(df, geographic_trajectories, transposition_domain, l
 def plot_storm_properties_pairplot(storm_properties, save_path, domain_name, dpi=300):
     """Seaborn pairplot of numeric storm properties; saves a PNG and returns its path."""
     cols = {
-        "mean_direction_deg": "Mean Direction (deg)",
+        "mean_direction_deg": "Mean Direction (deg CCW from E)",
         "mean_speed_ms": "Mean Speed (m/s)",
         "storm_area_km2": "Storm Area (km^2)",
         "mean_intensity_mmh": "Mean Intensity (mm/h)",

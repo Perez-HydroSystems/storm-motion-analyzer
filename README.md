@@ -81,6 +81,8 @@ Written to `<output_dir>/<domain_name>/`:
 - **Intensity** — peak and mean rainfall intensity for each storms.
 - **Spatial morphology** — storm area coverage, ellipse area and dimensions.
 
+**Direction convention.** Detection, tracking, and ellipse fitting run on the equal-area EPSG:2163 grid, but all motion metrics (direction, speed, trajectory length, angular variance) are geodesic on the WGS84 ellipsoid, computed from the centroid longitude/latitude. Directions give the direction of motion in degrees counterclockwise from east (0° = east, 90° = north, 180° = west, 270° = south), relative to true east/north. The reported mean direction is the distance-weighted circular mean of the geodesic segment directions. It is not exactly the first-to-last direction, so that direction is reported separately (`endpoint_direction_deg`).
+
 
  
 

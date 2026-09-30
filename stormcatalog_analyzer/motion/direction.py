@@ -1,6 +1,84 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pyproj import Geod
+
+# WGS84 ellipsoid used for all geodesic motion metrics (bearings, distances)
+_GEOD = Geod(ellps="WGS84")
+
+
+def segment_geodesics(lon, lat):
+    """
+    Geodesic forward azimuth and length of each centroid-to-centroid segment on WGS84.
+
+    Azimuths are compass bearings of the direction of motion (0 = north, 90 = east,
+    clockwise), measured relative to true north at each segment's start point.
+    Zero-length segments are dropped. Returns (azimuth_deg, distance_m).
+    """
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+    if lon.size < 2:
+        return np.array([]), np.array([])
+    az, _, dist = _GEOD.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    az = np.atleast_1d(az) % 360.0
+    dist = np.atleast_1d(dist)
+    keep = np.isfinite(dist) & (dist > 0)
+    return az[keep], dist[keep]
+
+
+def mean_bearing(lon, lat, weighted=True):
+    """
+    Circular mean of the geodesic segment bearings (compass degrees, direction of motion).
+
+    With ``weighted=True`` each segment is weighted by its geodesic length. Returns
+    (mean_bearing_deg in [0, 360), angular_variance = 1 - R). Unlike the projected-plane
+    ``mean_direction_weighted``, the weighted mean is not in general identical to the
+    first-to-last bearing (see ``endpoint_bearing``), because each azimuth refers to
+    local north at its own segment.
+    """
+    az, dist = segment_geodesics(lon, lat)
+    if az.size == 0:
+        return np.nan, np.nan
+    if not weighted:
+        dist = np.ones_like(dist)
+    az_rad = np.radians(az)
+    S = np.sum(dist * np.sin(az_rad))
+    C = np.sum(dist * np.cos(az_rad))
+    mean_bearing = np.degrees(np.arctan2(S, C)) % 360.0
+    Rw = np.hypot(S, C) / np.sum(dist)
+    return mean_bearing, 1 - Rw
+
+
+def endpoint_bearing(lon, lat):
+    """Geodesic forward azimuth (compass, degrees) from the first to the last centroid."""
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+    if lon.size < 2:
+        return np.nan
+    az, _, dist = _GEOD.inv(lon[0], lat[0], lon[-1], lat[-1])
+    return float(az % 360.0) if dist > 0 else np.nan
+
+
+def bearing_to_math(bearing_deg):
+    """Compass bearing (0 = N, clockwise) -> reported direction (0 = E, counterclockwise)."""
+    return (90.0 - np.asarray(bearing_deg, dtype=float)) % 360.0
+
+
+def line_length_geodesic(lon, lat):
+    """Total geodesic length (m) of the centroid trajectory."""
+    return float(np.sum(segment_geodesics(lon, lat)[1]))
+
+
+def mean_speed_geodesic(lon, lat):
+    """Mean geodesic step length per hour, converted to m/s (hourly centroids)."""
+    # stationary steps count as zero speed, as in ``mean_velocity``
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+    if lon.size < 2:
+        return 0
+    _, _, dist = _GEOD.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    return float(np.mean(dist)) / 3600
+
 
 def mean_direction_ln(x, y):
      # Perform linear regression to find the slope

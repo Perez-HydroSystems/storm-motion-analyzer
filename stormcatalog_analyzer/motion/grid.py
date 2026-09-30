@@ -7,7 +7,27 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse, Wedge, FancyArrowPatch
-from pyproj import Transformer
+from pyproj import Transformer, Geod
+
+from .direction import mean_bearing, endpoint_bearing
+
+# The grid itself lives in the EPSG:2163 plane (equal-area cells), but motion
+# directions are geodesic bearings on WGS84, i.e. relative to true north. EPSG:2163
+# grid north departs from true north away from 100 W (e.g. ~4 deg in Iowa, ~20 deg
+# in Maine), so directions are not taken from projected dx/dy.
+_PCS_TO_GCS = Transformer.from_crs("EPSG:2163", "EPSG:4326", always_xy=True)
+_GCS_TO_PCS = Transformer.from_crs("EPSG:4326", "EPSG:2163", always_xy=True)
+_GEOD = Geod(ellps="WGS84")
+
+
+def _grid_unit_vector(lon, lat, bearing_deg, step_m=1000.0):
+    """Unit vector in the EPSG:2163 plane pointing along a true-north bearing (for drawing)."""
+    lon1, lat1, _ = _GEOD.fwd(lon, lat, bearing_deg, step_m)
+    x0, y0 = _GCS_TO_PCS.transform(lon, lat)
+    x1, y1 = _GCS_TO_PCS.transform(lon1, lat1)
+    dx, dy = x1 - x0, y1 - y0
+    norm = np.hypot(dx, dy)
+    return dx / norm, dy / norm
 
 
 def _ellipse_mask(x_grid, y_grid, center_x, center_y, major_axis_m, minor_axis_m, angle_deg):
@@ -153,9 +173,12 @@ def build_storm_motion_grid(
 
     Notes
     -----
-    ``direction_deg`` follows mathematical map coordinates: 0 is east and
-    angles increase counterclockwise. ``bearing_deg`` is also returned using
-    compass convention: 0 is north and angles increase clockwise.
+    Directions are geodesic (WGS84) between consecutive ellipse centroids, relative
+    to true north. ``bearing_deg`` uses the compass convention (0 is north, angles
+    increase clockwise); ``direction_deg`` is the same direction in the mathematical
+    convention (0 is east, counterclockwise). ``step_distance_m`` is the geodesic
+    distance. ``u``/``v`` are unit vectors in the projected (EPSG:2163) plane, for
+    drawing arrows on projected maps.
     """
     if cell_size_m <= 0:
         raise ValueError("cell_size_m must be positive")
@@ -205,6 +228,15 @@ def build_storm_motion_grid(
     records = []
     times = np.asarray(event_dict["selected_storm_time_steps"].values)
 
+    # geodesic bearing/distance of every centroid-to-centroid step
+    cent_lon, cent_lat = _PCS_TO_GCS.transform(
+        record["ellipse_cent_prj_lon(m)"].to_numpy(dtype=float),
+        record["ellipse_cent_prj_lat(m)"].to_numpy(dtype=float),
+    )
+    step_az, _, step_dist = _GEOD.inv(cent_lon[:-1], cent_lat[:-1], cent_lon[1:], cent_lat[1:])
+    step_az = np.atleast_1d(step_az)
+    step_dist = np.atleast_1d(step_dist)
+
     for t in range(n_motion_steps):
         cx = record.loc[t, "ellipse_cent_prj_lon(m)"]
         cy = record.loc[t, "ellipse_cent_prj_lat(m)"]
@@ -213,17 +245,18 @@ def build_storm_motion_grid(
 
         dx = nx - cx
         dy = ny - cy
-        distance_m = np.hypot(dx, dy)
-        if distance_m == 0 or not np.isfinite(distance_m):
+        grid_distance_m = np.hypot(dx, dy)
+        distance_m = step_dist[t]
+        if distance_m == 0 or not np.isfinite(distance_m) or grid_distance_m == 0:
             theta = np.nan
             bearing = np.nan
             unit_u = np.nan
             unit_v = np.nan
         else:
-            theta = np.degrees(np.arctan2(dy, dx)) % 360.0
-            bearing = (90.0 - theta) % 360.0
-            unit_u = dx / distance_m
-            unit_v = dy / distance_m
+            bearing = step_az[t] % 360.0
+            theta = (90.0 - bearing) % 360.0
+            unit_u = dx / grid_distance_m
+            unit_v = dy / grid_distance_m
 
         mask = _ellipse_mask(
             x_grid,
@@ -624,42 +657,27 @@ def _trajectory_xy_from_event(event_dict, centroid_source="ellipse"):
 
 
 def _mean_trajectory_direction(x, y, method="weighted"):
+    """Mean geodesic trajectory direction from projected (EPSG:2163) centroids.
+
+    Returns (direction_deg, bearing_deg, u, v): the direction relative to true north in
+    math and compass conventions, and a projected-plane unit vector for drawing.
+    """
     if len(x) < 2:
         return np.nan, np.nan, np.nan, np.nan
-
-    dx = np.diff(x)
-    dy = np.diff(y)
-    segment_length = np.hypot(dx, dy)
-    valid = segment_length > 0
-    if not np.any(valid):
-        return np.nan, np.nan, np.nan, np.nan
-
-    angles = np.arctan2(dy[valid], dx[valid])
-    if method == "weighted":
-        weights = segment_length[valid]
-    elif method == "unweighted":
-        weights = np.ones(np.sum(valid), dtype=float)
-    elif method == "end_to_end":
-        total_dx = x[-1] - x[0]
-        total_dy = y[-1] - y[0]
-        total_length = np.hypot(total_dx, total_dy)
-        if total_length == 0:
-            return np.nan, np.nan, np.nan, np.nan
-        direction_deg = np.degrees(np.arctan2(total_dy, total_dx)) % 360.0
-        bearing_deg = (90.0 - direction_deg) % 360.0
-        return direction_deg, bearing_deg, total_dx / total_length, total_dy / total_length
-    else:
+    if method not in {"weighted", "unweighted", "end_to_end"}:
         raise ValueError("method must be 'weighted', 'unweighted', or 'end_to_end'")
 
-    sin_sum = np.sum(weights * np.sin(angles))
-    cos_sum = np.sum(weights * np.cos(angles))
-    norm = np.hypot(cos_sum, sin_sum)
-    if norm == 0:
+    lon, lat = _PCS_TO_GCS.transform(np.asarray(x, dtype=float), np.asarray(y, dtype=float))
+    if method == "end_to_end":
+        bearing_deg = endpoint_bearing(lon, lat)
+    else:
+        bearing_deg, _ = mean_bearing(lon, lat, weighted=(method == "weighted"))
+    if not np.isfinite(bearing_deg):
         return np.nan, np.nan, np.nan, np.nan
 
-    direction_deg = np.degrees(np.arctan2(sin_sum, cos_sum)) % 360.0
-    bearing_deg = (90.0 - direction_deg) % 360.0
-    return direction_deg, bearing_deg, cos_sum / norm, sin_sum / norm
+    direction_deg = (90.0 - bearing_deg) % 360.0
+    unit_u, unit_v = _grid_unit_vector(np.mean(lon), np.mean(lat), bearing_deg)
+    return direction_deg, bearing_deg, unit_u, unit_v
 
 
 def build_trajectory_direction_grid(
@@ -790,6 +808,8 @@ def build_trajectory_direction_grid(
     count = np.zeros((n_rows, n_cols), dtype=int)
     sum_u = np.zeros((n_rows, n_cols), dtype=float)
     sum_v = np.zeros((n_rows, n_cols), dtype=float)
+    sum_sin = np.zeros((n_rows, n_cols), dtype=float)
+    sum_cos = np.zeros((n_rows, n_cols), dtype=float)
     direction_lists = np.empty((n_rows, n_cols), dtype=object)
     bearing_lists = np.empty((n_rows, n_cols), dtype=object)
     u_lists = np.empty((n_rows, n_cols), dtype=object)
@@ -813,6 +833,8 @@ def build_trajectory_direction_grid(
         count[row_idx, col_idx] += 1
         sum_u[row_idx, col_idx] += row["u"]
         sum_v[row_idx, col_idx] += row["v"]
+        sum_sin[row_idx, col_idx] += np.sin(np.radians(row["bearing_deg"]))
+        sum_cos[row_idx, col_idx] += np.cos(np.radians(row["bearing_deg"]))
         direction_lists[row_idx, col_idx].append(row["direction_deg"])
         bearing_lists[row_idx, col_idx].append(row["bearing_deg"])
         u_lists[row_idx, col_idx].append(row["u"])
@@ -833,13 +855,17 @@ def build_trajectory_direction_grid(
 
     occupied = count > 0
     if aggregation_mode == "mean":
+        # circular mean of the true-north bearings; mean_u/mean_v (projected plane)
+        # are only used to draw the cell arrows
+        bearing_norm = np.hypot(sum_sin, sum_cos)
+        usable = occupied & (bearing_norm > 0)
+        mean_bearing_deg[usable] = np.degrees(np.arctan2(sum_sin[usable], sum_cos[usable])) % 360.0
+        mean_direction_deg[usable] = (90.0 - mean_bearing_deg[usable]) % 360.0
+        resultant_length[occupied] = bearing_norm[occupied] / count[occupied]
         vector_norm = np.hypot(sum_u, sum_v)
-        usable = occupied & (vector_norm > 0)
-        mean_u[usable] = sum_u[usable] / vector_norm[usable]
-        mean_v[usable] = sum_v[usable] / vector_norm[usable]
-        mean_direction_deg[usable] = np.degrees(np.arctan2(mean_v[usable], mean_u[usable])) % 360.0
-        mean_bearing_deg[usable] = (90.0 - mean_direction_deg[usable]) % 360.0
-        resultant_length[occupied] = vector_norm[occupied] / count[occupied]
+        drawable = occupied & (vector_norm > 0)
+        mean_u[drawable] = sum_u[drawable] / vector_norm[drawable]
+        mean_v[drawable] = sum_v[drawable] / vector_norm[drawable]
 
     return {
         "cell_size_m": cell_size_m,

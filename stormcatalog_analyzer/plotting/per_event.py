@@ -253,12 +253,13 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     ax[1].add_patch(bounding_box)
 
     # Calculate the mean direction vector
-    mean_track_direction = storm_tracking_results[storm_name]['mean_direction_weighted']
+    # geodesic mean bearing (compass deg: 0 = N, clockwise, direction of motion)
+    mean_track_direction = storm_tracking_results[storm_name]['mean_bearing']
     # Calculate the mean speed
     mean_speed = storm_tracking_results[storm_name]['mean_velocity']
     # Create text for mean direction and speed  
-    mean_direction_text = f"Mean Direction: {mean_track_direction:.2f}°"
-    var_direction_text = f"Angular Variance: {storm_tracking_results[storm_name]['var_dir_weighted']:.2f}°"
+    mean_direction_text = f"Mean Direction: {(90.0 - mean_track_direction) % 360:.2f}° CCW from E"
+    var_direction_text = f"Angular Variance: {storm_tracking_results[storm_name]['var_bearing']:.2f}"
     mean_speed_text = f"Mean Speed: {mean_speed:.2f} m/s"
 
     
@@ -274,9 +275,12 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     y = np.array(event_dict['storm_lat_cent'][start_time_index:end_time_index])
     # Calculate the mean coordinates of the storm centroid trajectory
     xa, ya = x.mean(), y.mean()
-     # direction (degrees -> radians), unit vector
+    # bearing -> unit vector in lon/lat degree space (a degree of longitude is
+    # cos(lat) shorter than a degree of latitude)
     theta = np.radians(mean_track_direction)
-    cx, sy = np.cos(theta), np.sin(theta)
+    cx, sy = np.sin(theta) / np.cos(np.radians(ya)), np.cos(theta)
+    norm = np.hypot(cx, sy)
+    cx, sy = cx / norm, sy / norm
     # ─── bounding‐box vector ───
     dx = x.max() - x.min()
     dy = y.max() - y.min()
