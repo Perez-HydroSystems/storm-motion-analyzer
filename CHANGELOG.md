@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run_catalog_tracking` and `track_one_event` (new keyword arguments `ratio_threshold`,
   `dry_spell_time`, `area_fraction`, defaulting to the old values). Results are unchanged for
   configs that use the defaults.
+- **Storm area used a hardcoded 1/24° pixel size.** `continuos_storm` and
+  `storm_tracking_features` assumed 0.04166° cells, but catalogs on the AORC 1/30° grid
+  (including `testing_data/`) have 0.03333° cells, so each pixel was counted as
+  (0.04166/0.03333)² = 1.5625× its real area. The cell size is now read from the catalog
+  coordinates (`compute_pixel_area`). Only `storm_area_km2` changes (×0.64 on 1/30° grids);
+  the area-weighted mean rainfall and the `min_area_fraction` test are ratios and were
+  unaffected.
 
 ### Changed
 

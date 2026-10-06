@@ -10,6 +10,17 @@ from . import identification as storm_identification
 from . import tracking as storm_tracking
 from . import catalog as storm_catalog_functions
 
+def compute_pixel_area(lon_array, lat_array):
+    """
+    Area of each grid cell (unit: km^2), using the cell size of the catalog grid itself
+    :param lon_array: 2-dimension array of longitudes (degree), dim (latitude, longitude)
+    :param lat_array: 2-dimension array of latitudes (degree), dim (latitude, longitude)
+    :return: array of pixel areas with dim (latitude, longitude)
+    """
+    lat_cell_degree = np.abs(np.diff(lat_array[:, 0])).mean()
+    lon_cell_degree = np.abs(np.diff(lon_array[0, :])).mean()
+    return np.cos(lat_array * np.pi / 180) * 111 * 111 * lat_cell_degree * lon_cell_degree
+
 def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_threshold = 0.2, var_name = 'rain',
                          ratio_threshold = 0.2, dry_spell_time = 0, area_fraction = 0.05):
 
@@ -80,10 +91,7 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
 
 def continuos_storm(storm_dict, area_fraction = 0.05):
 # compute projected area of each pixel (unit: km^2)
-    
-    lat_cell_degree = 0.04166412
-    lon_cell_degree = 0.04166412
-    pixel_area = np.cos(storm_dict['lat_array'] * np.pi / 180) * 111 * 111 * lat_cell_degree * lon_cell_degree
+    pixel_area = compute_pixel_area(storm_dict['lon_array'], storm_dict['lat_array'])
     # compute the total area of the study domain
     domain_total_area = np.sum(pixel_area)
     # compute the storm area at each time step
@@ -150,9 +158,7 @@ def storm_tracking_features(storm_dict, ellipse_fit = "moments"):
         # compute the storm centroid weighted by precipitaiton (unit: degree)
         storm_lon_cent, storm_lat_cent = storm_catalog_functions.compute_weighted_centroid(curr_prcp_array, storm_dict['lon_array'], storm_dict['lat_array'])
         # compute the storm area weighted average precipitation (unit: mm/h)
-        lat_cell_degree = 0.04166412
-        lon_cell_degree = 0.04166412
-        pixel_area = np.cos(storm_dict['lat_array'] * np.pi / 180) * 111 * 111 * lat_cell_degree * lon_cell_degree
+        pixel_area = compute_pixel_area(storm_dict['lon_array'], storm_dict['lat_array'])
         storm_avg_prcp = storm_catalog_functions.compute_weighted_average(curr_prcp_array, pixel_area)
         # compute the maximum precipitation (unit: mm/h)
         storm_max_prcp = np.max(curr_prcp_array)
