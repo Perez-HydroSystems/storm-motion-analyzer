@@ -52,6 +52,19 @@ def _parse_storm_id(name: str, fallback: int) -> int:
         return fallback
 
 
+def _axial_mean_deg(angles_deg) -> float:
+    """Mean of axial angles (ellipse orientations, period 180 deg), in (-90, 90].
+
+    Doubling maps the 180-deg-periodic axis angles onto the full circle, so that,
+    e.g., +89 and -89 deg (both nearly north-south) average to ~90, not to 0.
+    """
+    a = np.radians(2 * np.asarray(angles_deg, dtype=float))
+    a = a[np.isfinite(a)]
+    if a.size == 0:
+        return float("nan")
+    return float(np.degrees(0.5 * np.arctan2(np.mean(np.sin(a)), np.mean(np.cos(a)))))
+
+
 # --------------------------------------------------------------------------
 # Stage 1: tracking
 # --------------------------------------------------------------------------
@@ -187,7 +200,7 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
             "trajectory_length_km": trajectory_length_m / 1000.0,
             "major_km": float(np.nanmean(major)) / 1000.0,
             "minor_km": float(np.nanmean(minor)) / 1000.0,
-            "ellipse_angle": float(np.nanmean(angle)),
+            "ellipse_angle": _axial_mean_deg(angle),
             "duration_hours": int(end_idx - start_idx + 1),
             "start_time": times[start_idx].values,
             "end_time": times[end_idx].values,

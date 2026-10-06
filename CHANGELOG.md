@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coordinates (`compute_pixel_area`). Only `storm_area_km2` changes (×0.64 on 1/30° grids);
   the area-weighted mean rainfall and the `min_area_fraction` test are ratios and were
   unaffected.
+- **`mean_ellipse_angle_deg` was an arithmetic mean of axial angles.** Hourly ellipse
+  orientations are axis angles in (−90°, 90°], where +89° and −89° are both nearly
+  north–south, but they were averaged with `np.nanmean`, which returns ~0° (east–west) for
+  such storms. The per-storm value is now the axial circular mean (angles doubled, circular
+  mean, halved), still in (−90°, 90°]. On the Iowa and Texas 24 h catalogs about a third of
+  storms change by more than 10° and ~15 % by more than 30° (up to ~85°); the catalog-level
+  orientation consistency was overstated (e.g., Iowa resultant length 0.58 → 0.30).
+  `mean_direction_deg` (direction of motion) was already a circular mean and is unchanged.
 
 ### Changed
 
