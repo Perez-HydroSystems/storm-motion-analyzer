@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   elongation ratio +7 to +8 %, mean intensity and total rainfall +17 %, and the most-intense
   window moves for ~6 % of storms. Area, speed, and direction change only for those storms.
   Outputs generated with v1.0.0 and the moments fit should be regenerated.
+- **`tracking.overlap_ratio_threshold`, `tracking.dry_spell_hr`, and `selection.min_area_fraction`
+  were ignored.** They were validated in the config but `storm_tracking_event` and
+  `continuos_storm` used hardcoded values (`0.2`, `0`, `0.05`). They are now passed through by
+  `run_catalog_tracking` and `track_one_event` (new keyword arguments `ratio_threshold`,
+  `dry_spell_time`, `area_fraction`, defaulting to the old values). Results are unchanged for
+  configs that use the defaults.
 
 ### Changed
 

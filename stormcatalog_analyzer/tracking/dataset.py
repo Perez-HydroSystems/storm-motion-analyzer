@@ -10,7 +10,8 @@ from . import identification as storm_identification
 from . import tracking as storm_tracking
 from . import catalog as storm_catalog_functions
 
-def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_threshold = 0.2, var_name = 'rain'):
+def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_threshold = 0.2, var_name = 'rain',
+                         ratio_threshold = 0.2, dry_spell_time = 0, area_fraction = 0.05):
 
     # extract basic attributes of the raw data
     # time variables dimension (350, 72)
@@ -32,15 +33,15 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
 
     # The second step is tracking, it tracks the storm area over time
     # parameters:
-    # ratio_threshold: if the storm areas in t-1 and t are overlapped by 0.2 (20%), then they are considered as a consecutive storm object
+    # ratio_threshold: if the storm areas in t-1 and t overlap by at least this ratio (default 0.2 = 20%), they are considered as a consecutive storm object
     # dry_spell_time: if the tracking algorithm can't find a suitable object at t, it will search at t+1 for potential suitable object
     # I suggest using dry spell time as zero. Because if the storm loses its tracking in the next time step, it is difficult to
     # calculate correct direction and moving distance
-    track_array = storm_tracking.track(identification_array, ratio_threshold=0.2, dry_spell_time=0)
+    track_array = storm_tracking.track(identification_array, ratio_threshold=ratio_threshold, dry_spell_time=dry_spell_time)
     #Based on the tracking array, we find out the longest, continous storm event during this period
     # longest_event_label: each continous storm is labeled with a unique number, we find out this number for the longest storm we want
-    # area_portion_threshold: at one step, the storm area should be greater than 5% of the entire domain to be conunted in its duration
-    longest_event_label, longest_duration = storm_tracking.single_event_selection(track_array, area_portion_threshold = 0.05)
+    # area_fraction: at one step, the storm area should be greater than this fraction (default 5%) of the entire domain to be counted in its duration
+    longest_event_label, longest_duration = storm_tracking.single_event_selection(track_array, area_portion_threshold=area_fraction)
 
     print("The longest storm has a valid duration of {0} hours".format(longest_duration))
 
@@ -77,7 +78,7 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
 
     return storm_dict
 
-def continuos_storm(storm_dict):    
+def continuos_storm(storm_dict, area_fraction = 0.05):
 # compute projected area of each pixel (unit: km^2)
     
     lat_cell_degree = 0.04166412
@@ -89,8 +90,8 @@ def continuos_storm(storm_dict):
     storm_area_array = np.sum(np.where(storm_dict['track_array'] == storm_dict['longest_event_label'], pixel_area, 0), axis = (1, 2))
 
     # set a mask of True and False
-    area_mask = storm_area_array > 0.05 * domain_total_area
-    # This is to identify time steps when the storm area is greater than 5% of the total domain area
+    area_mask = storm_area_array > area_fraction * domain_total_area
+    # This is to identify time steps when the storm area is greater than area_fraction (default 5%) of the total domain area
 
     # Find the index of the first non-zero element
     start_index = next((i for i, x in enumerate(area_mask) if x), None)

@@ -69,13 +69,16 @@ def run_catalog_tracking(cfg: Config, verbose: bool = True) -> Dict[str, dict]:
                 morph_radius=t.morph_radius_cells,
                 high_threshold=t.rainfall_threshold_mmhr,
                 var_name=t.rainfall_var_name,
+                ratio_threshold=t.overlap_ratio_threshold,
+                dry_spell_time=t.dry_spell_hr,
+                area_fraction=cfg.selection.min_area_fraction,
             )
             if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
                 if verbose:
                     print(f"skip {name}: duration {event_dict['longest_duration']} "
                           f"< {cfg.selection.min_duration_hr}")
                 continue
-            continuos_storm(event_dict)
+            continuos_storm(event_dict, area_fraction=cfg.selection.min_area_fraction)
             storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
             results[name] = event_dict
             if verbose:
@@ -397,13 +400,15 @@ def track_one_event(cfg: Config, storm: str):
         storm_tracking_event(
             ds, event_dict,
             morph_radius=t.morph_radius_cells, high_threshold=t.rainfall_threshold_mmhr, var_name=t.rainfall_var_name,
+            ratio_threshold=t.overlap_ratio_threshold, dry_spell_time=t.dry_spell_hr,
+            area_fraction=cfg.selection.min_area_fraction,
         )
         if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
             raise RuntimeError(
                 f"{name}: longest duration {event_dict['longest_duration']} "
                 f"< min_duration_hr={cfg.selection.min_duration_hr}"
             )
-        continuos_storm(event_dict)
+        continuos_storm(event_dict, area_fraction=cfg.selection.min_area_fraction)
         storm_tracking_features(event_dict, ellipse_fit=t.ellipse_fit_method)
     finally:
         ds.close()
