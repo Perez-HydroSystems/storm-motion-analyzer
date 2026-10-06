@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Moments ellipse fit (`fit_ellipse_to_rainfall`, the default `ellipse_fit_method = "moments"`)
+  used inconsistent moments.** `m00` and the centroid were computed from the thresholded
+  rainfall field, but the second central moments (`mu20`, `mu02`, `mu11`) summed the
+  unthresholded field, so they were not weighted variances of either field and the ellipse
+  was inflated. All moments now use the thresholded field.
+  Because the ellipse also masks the rainfall used for `mean_intensity_mmh` (which selects
+  the most-intense window), results produced with the moments fit change. On the Iowa and
+  Texas 24 h catalogs (median per storm): major axis −13 to −14 %, minor axis −20 %,
+  elongation ratio +7 to +8 %, mean intensity and total rainfall +17 %, and the most-intense
+  window moves for ~6 % of storms. Area, speed, and direction change only for those storms.
+  Outputs generated with v1.0.0 and the moments fit should be regenerated.
+
 ### Changed
 
 - **Storm-motion directions are now geodesic bearings relative to true north.**

@@ -214,10 +214,11 @@ def fit_ellipse_to_rainfall(rainfall_field, x_coords, y_coords, threshold=1.0):
     x_bar = m10 / m00
     y_bar = m01 / m00
 
-    # Second central moments (to find size and orientation)
-    mu20 = np.sum((x_coords - x_bar)**2 * field) / m00
-    mu02 = np.sum((y_coords - y_bar)**2 * field) / m00
-    mu11 = np.sum((x_coords - x_bar) * (y_coords - y_bar) * field) / m00
+    # Second central moments (to find size and orientation), using the same
+    # thresholded field as m00 and the centroid so they are true weighted variances
+    mu20 = np.sum((x_coords - x_bar)**2 * field_thresholded) / m00
+    mu02 = np.sum((y_coords - y_bar)**2 * field_thresholded) / m00
+    mu11 = np.sum((x_coords - x_bar) * (y_coords - y_bar) * field_thresholded) / m00
 
     # --- Step 3: Calculate Ellipse Axes and Angle ---
     # Common term
