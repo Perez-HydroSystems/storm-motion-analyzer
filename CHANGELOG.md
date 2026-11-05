@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Envelope drift of the rain field** (`motion.drift`, `pipeline.summarize_drift` /
+  `generate_drift_diagnostics` / `run_drift`, CLI `stormcatalog-analyzer drift [--axis AZ]`).
+  The slow, sustained displacement of the whole rain field over an event, as opposed to
+  the storm-cell motion of the most-intense window. Method: 6-h block totals, their
+  rain-weighted centroids (EPSG:5070), blocks with at least 2% of the event total,
+  and a rain-weighted linear trend of x(t) and y(t). Reported for the whole event and for
+  its wettest `window_hr` hours (prefix `w{window_hr}_`). Outputs: velocity components,
+  speed, compass bearing and package-convention direction, track R², and (with
+  `drift.axis_azimuth_deg`) the along- and cross-axis components. Writes
+  `storm_drift_<domain>.csv` and `storm_drift_diagnostic_<domain>.png` (drift vectors, and
+  empirical CDFs of speed and along-axis drift). Reads each event directly, so every
+  catalog event is included (no tracking or selection). An optional `drift.mask_path`
+  restricts the centroids to a polygon. New config section `drift` (defaults: `block_hr` 6,
+  `min_step_frac` 0.02, `window_hr` 72, `axis_azimuth_deg` null, `projected_crs`
+  "EPSG:5070", `mask_path` null). Tests: `tests/test_drift.py` (synthetic translating storms).
+
 ### Fixed
 
 - **Moments ellipse fit (`fit_ellipse_to_rainfall`, the default `ellipse_fit_method = "moments"`)

@@ -81,6 +81,12 @@ Written to `<output_dir>/<domain_name>/`:
 - **Intensity** — peak and mean rainfall intensity for each storms.
 - **Spatial morphology** — storm area coverage, ellipse area and dimensions.
 
+- **Envelope drift** — the slow, sustained displacement of the whole rain field over an event (where the rain falls on day 1 versus day 5), from a rain-weighted trend of 6-h centroids, for the whole event and for its wettest 72 h, with optional components along a reference axis (for example, a river basin's downstream axis). This is the motion that matters for flood response, because a rain envelope that drifts with the flood wave concentrates runoff in time. It is distinct from the storm-cell motion above.
+
+```bash
+python run_diagnostics.py drift --config configs/testing_data.json --axis 156   # writes storm_drift_<domain>.csv + figure
+```
+
 **Direction convention.** Detection, tracking, and ellipse fitting run on the equal-area EPSG:2163 grid, but all motion metrics (direction, speed, trajectory length, angular variance) are geodesic on the WGS84 ellipsoid, computed from the centroid longitude/latitude. Directions give the direction of motion in degrees counterclockwise from east (0° = east, 90° = north, 180° = west, 270° = south), relative to true east/north. The reported mean direction is the distance-weighted circular mean of the geodesic segment directions. It is not exactly the first-to-last direction, so that direction is reported separately (`endpoint_direction_deg`).
 
 

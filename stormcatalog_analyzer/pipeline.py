@@ -549,6 +549,79 @@ def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
 
 
 # --------------------------------------------------------------------------
+# Envelope drift of the rain field (no tracking needed)
+# --------------------------------------------------------------------------
+def summarize_drift(cfg: Config, verbose: bool = True) -> pd.DataFrame:
+    """Envelope drift of every catalog event (``motion.drift.event_drift``), one row per event.
+
+    Reads each event's hourly field directly (no storm identification/tracking), so it covers
+    every event in the catalog. Settings come from ``cfg.drift``; if ``drift.mask_path`` is set,
+    the centroids use only the rain inside that polygon.
+    """
+    from .motion.drift import event_drift
+
+    dc = cfg.drift
+    mask_geom = None
+    if dc.mask_path:
+        gdf = scio.load_vector(cfg.resolve(dc.mask_path))
+        if gdf is None:
+            raise FileNotFoundError(f"drift.mask_path not found: {dc.mask_path}")
+        mask_geom = gdf.to_crs("EPSG:4326").union_all() if hasattr(gdf, "union_all") else gdf.to_crs("EPSG:4326").unary_union
+    rows = []
+    for i, path in enumerate(scio.discover_events(cfg)):
+        ds = scio.open_event(path, var_name=cfg.tracking.rainfall_var_name)
+        try:
+            da = ds[cfg.tracking.rainfall_var_name]
+            lat_name = "latitude" if "latitude" in da.dims else "lat"
+            lon_name = "longitude" if "longitude" in da.dims else "lon"
+            da = da.transpose(da.dims[0], lat_name, lon_name)
+            lat = ds[lat_name].values
+            lon = ds[lon_name].values
+            mask = None
+            if mask_geom is not None:
+                from shapely import contains_xy
+                lo2, la2 = np.meshgrid(lon, lat)
+                mask = contains_xy(mask_geom, lo2, la2)
+            rec = event_drift(da.values, lon, lat, block_hr=dc.block_hr, min_step_frac=dc.min_step_frac,
+                              window_hr=dc.window_hr, axis_azimuth_deg=dc.axis_azimuth_deg,
+                              crs=dc.projected_crs, mask=mask)
+            t = ds[da.dims[0]].values
+            rec = {"storm_event": path.name, "storm_id": _parse_storm_id(path.name, i),
+                   "start_time": t[0], **rec}
+            rows.append(rec)
+        finally:
+            ds.close()
+        if verbose and (len(rows) % 50 == 0):
+            print(f"  drift: {len(rows)} events")
+    if verbose:
+        print(f"Envelope drift computed for {len(rows)} events.")
+    return pd.DataFrame(rows)
+
+
+def generate_drift_diagnostics(drift_df: pd.DataFrame, cfg: Config, highlight: Optional[dict] = None) -> dict:
+    """Save ``storm_drift_<domain>.csv`` and the drift diagnostic figure; return their paths."""
+    from .plotting.drift import plot_drift_diagnostics
+
+    paths = scio.ensure_output_dirs(cfg)
+    domain = cfg.io.domain_name
+    csv_path = paths["base"] / f"storm_drift_{domain}.csv"
+    drift_df.to_csv(csv_path, index=False)
+    fig = plot_drift_diagnostics(drift_df, str(paths["base"]), domain, window_hr=cfg.drift.window_hr,
+                                 axis_azimuth_deg=cfg.drift.axis_azimuth_deg, highlight=highlight,
+                                 dpi=cfg.figure.dpi, font_size=cfg.figure.font_size)
+    return {"table": csv_path, "figures": [Path(fig)]}
+
+
+def run_drift(cfg: Config, verbose: bool = True) -> dict:
+    """Envelope drift of every event + its CSV and diagnostic figure."""
+    df = summarize_drift(cfg, verbose=verbose)
+    out = generate_drift_diagnostics(df, cfg)
+    if verbose:
+        print(f"Saved drift table:\n  {out['table']}\nSaved figure:\n  {out['figures'][0]}")
+    return {"drift": df, **out}
+
+
+# --------------------------------------------------------------------------
 # Storm-motion direction-probability field (grid diagnostic)
 # --------------------------------------------------------------------------
 def build_direction_probability_field(results: Dict[str, dict], cfg: Config,
