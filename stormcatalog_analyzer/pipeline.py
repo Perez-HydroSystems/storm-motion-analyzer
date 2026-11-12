@@ -200,6 +200,8 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
             "trajectory_length_km": trajectory_length_m / 1000.0,
             "major_km": float(np.nanmean(major)) / 1000.0,
             "minor_km": float(np.nanmean(minor)) / 1000.0,
+            # hourly ellipse area pi * (major/2) * (minor/2), averaged over the window (km^2)
+            "ellipse_area_km2": float(np.nanmean(np.pi * (major / 2) * (minor / 2))) / 1e6,
             "ellipse_angle": _axial_mean_deg(angle),
             "duration_hours": int(end_idx - start_idx + 1),
             "start_time": times[start_idx].values,
@@ -245,6 +247,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
             "peak_intensity_mmh": m["peak_intensity"],
             "total_rainfall_mm": m["total_rainfall"],
             "storm_area_km2": m["area"],
+            "mean_ellipse_area_km2": m["ellipse_area_km2"],
             "trajectory_length_km": m["trajectory_length_km"],
             "mean_major_axis_km": m["major_km"],
             "mean_minor_axis_km": m["minor_km"],

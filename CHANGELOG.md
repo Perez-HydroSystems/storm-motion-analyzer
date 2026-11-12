@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mean_speed_grid_ms`, `trajectory_length_grid_km` are kept for comparison.
 - `motion.direction`: `segment_geodesics`, `mean_bearing`, `endpoint_bearing`, `bearing_to_math`,
   `line_length_geodesic`, `mean_speed_geodesic`.
+- `mean_ellipse_area_km2` in `storm_properties_<domain>.csv`: area of the fitted ellipse,
+  π·(major/2)·(minor/2), computed per time step and averaged over the most-intense window.
+  Unlike `storm_area_km2` (all tracked pixels ≥ the rainfall threshold), it describes the
+  storm core that the ellipse is fitted to (pixels above each step's median rainfall).
 
 ## [1.0.0] - 2026-07-15
 
