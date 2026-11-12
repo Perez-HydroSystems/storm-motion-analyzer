@@ -170,9 +170,9 @@ def circular_trend_permutation_test(years, directions_deg, n_permutations=9999, 
     Parameters
     ----------
     years : array-like
-        The time axis (e.g., [2000, 2001, ..., 2020])
+        The time axis (e.g., [2000, 2001, ..., 2020]); the rate is per unit of it
     directions_deg : array-like
-        Yearly mean directions in degrees
+        Yearly directions in degrees
     n_permutations : int
         Number of permutations
     seed : int
@@ -180,7 +180,10 @@ def circular_trend_permutation_test(years, directions_deg, n_permutations=9999, 
     
     Returns
     -------
-    dict with observed slopes, combined statistic, and p-value
+    dict with observed slopes, combined statistic, angular rate (degrees per unit time,
+    counterclockwise positive), mean resultant length of the directions with a stability
+    flag (R_bar >= 0.3), and the permutation p-value (1 + #{perm >= obs}) / (n_permutations + 1).
+    The permutation assumes exchangeable annual values (no serial dependence).
     """
     rng = np.random.default_rng(seed)
     years = np.array(years)
@@ -208,9 +211,15 @@ def circular_trend_permutation_test(years, directions_deg, n_permutations=9999, 
     obs_slope_u, obs_slope_v = get_slopes(years, U, V)
     obs_stat = combined_statistic(obs_slope_u, obs_slope_v)
 
-    # angular mean direction of the slopes (for interpretability)
-    rate_dir_rad = obs_slope_u * V_mean - obs_slope_v * U_mean
-    rate_dir_deg = np.rad2deg(rate_dir_rad) ## degrees per year
+    # Angular rate of the fitted direction theta(t) = atan2(U(t), V(t)) at the mean:
+    #   d(theta)/dt = (V_bar * dU/dt - U_bar * dV/dt) / (U_bar^2 + V_bar^2),
+    # with U_bar, V_bar the mean components (length R_bar). Multiplying the slopes by the
+    # UNIT mean vector divides by R_bar instead of R_bar^2 and underestimates the rate by
+    # the factor R_bar. The rate is unstable when the directions are widely spread.
+    U_bar, V_bar = np.mean(U), np.mean(V)
+    R_bar = float(np.hypot(U_bar, V_bar))
+    rate_dir_rad = (obs_slope_u * V_bar - obs_slope_v * U_bar) / (U_bar ** 2 + V_bar ** 2)
+    rate_dir_deg = np.rad2deg(rate_dir_rad)  # degrees per unit of ``years``
 
     # --- Permutation distribution ---
     perm_stats = np.empty(n_permutations)
@@ -230,6 +239,63 @@ def circular_trend_permutation_test(years, directions_deg, n_permutations=9999, 
         "slope_V": obs_slope_v,
         "observed_statistic": obs_stat,
         "rate_direction_deg": rate_dir_deg,
+        "mean_resultant_length": R_bar,
+        "rate_stable": bool(R_bar >= 0.3),
         "p_value": p_value,
         "perm_stats": perm_stats,
     }
+
+
+# ---------------------------------------------------------------------------
+# Directional coherence: length-weighted Rayleigh test
+# ---------------------------------------------------------------------------
+RAYLEIGH_BASE_SEED = 20261103   # base seed of the Monte Carlo null of the weighted Rayleigh test
+
+
+def rayleigh_p_unweighted(n, R):
+    """
+    Finite-sample p-value of the classical (unweighted) Rayleigh test (Zar, 2010, eq. 27.4;
+    Berens, 2009, circ_rtest).
+
+    n: number of directions; R: resultant length |sum(exp(i*theta))| (not the mean resultant length).
+    """
+    n = np.asarray(n, dtype=float)
+    R = np.asarray(R, dtype=float)
+    p = np.exp(np.sqrt(1 + 4 * n + 4 * (n ** 2 - R ** 2)) - (1 + 2 * n))
+    return np.clip(p, 0.0, 1.0)
+
+
+def weighted_rayleigh_test(theta_rad, weights, n_sim=10_000, rng=None, seed=None, chunk=20_000):
+    """
+    Length-weighted Rayleigh test with a Monte Carlo null conditional on the observed weights.
+
+    Statistic: weighted mean resultant length r_w = |sum_k w_k exp(i theta_k)| / sum_k w_k,
+    i.e. one minus the length-weighted angular variance. Null hypothesis: the directions are
+    independent and uniform on the circle, with the weights (segment lengths) fixed at their
+    observed values. The p-value is (1 + #{r_w,sim >= r_w,obs}) / (n_sim + 1), so it is never
+    zero. With equal weights the test reduces to the classical Rayleigh test. Independence
+    between successive segments is an assumption of the null, not a property of storm tracks.
+
+    Returns (r_w, p_value); (nan, nan) when there are no valid directions.
+    """
+    theta = np.asarray(theta_rad, dtype=float)
+    w = np.asarray(weights, dtype=float)
+    mask = np.isfinite(theta) & np.isfinite(w) & (w > 0)
+    theta, w = theta[mask], w[mask]
+    if theta.size == 0:
+        return np.nan, np.nan
+    if rng is None:
+        rng = np.random.default_rng(RAYLEIGH_BASE_SEED if seed is None else seed)
+
+    sw = w.sum()
+    r_obs = np.hypot(np.sum(w * np.cos(theta)), np.sum(w * np.sin(theta))) / sw
+    exceed = 0
+    done = 0
+    while done < n_sim:
+        m = min(chunk, n_sim - done)
+        phi = rng.uniform(0.0, 2.0 * np.pi, size=(m, theta.size))
+        r_sim = np.hypot((np.cos(phi) * w).sum(axis=1), (np.sin(phi) * w).sum(axis=1)) / sw
+        # small tolerance so that floating-point ties (equal weights, exact alignment) count as >=
+        exceed += int(np.count_nonzero(r_sim >= r_obs - 1e-12))
+        done += m
+    return float(r_obs), (1 + exceed) / (n_sim + 1)

@@ -3,17 +3,25 @@ import numpy as np
 import pandas as pd
 from pyproj import Geod
 
+from ..stats.circular import RAYLEIGH_BASE_SEED, rayleigh_p_unweighted, weighted_rayleigh_test
+
 # WGS84 ellipsoid used for all geodesic motion metrics (bearings, distances)
 _GEOD = Geod(ellps="WGS84")
 
+# Segments shorter than this (m) are zero-length (repeated centroid) and have no bearing.
+# pyproj returns ~1e-10 m, not 0, for two identical points, so a strict ``dist > 0`` kept
+# spurious segments with an arbitrary azimuth.
+MIN_SEGMENT_LENGTH_M = 1.0
 
-def segment_geodesics(lon, lat):
+
+def segment_geodesics(lon, lat, min_length=MIN_SEGMENT_LENGTH_M):
     """
     Geodesic forward azimuth and length of each centroid-to-centroid segment on WGS84.
 
     Azimuths are compass bearings of the direction of motion (0 = north, 90 = east,
     clockwise), measured relative to true north at each segment's start point.
-    Zero-length segments are dropped. Returns (azimuth_deg, distance_m).
+    Segments shorter than ``min_length`` (m) have no defined bearing and are dropped
+    (speed and track length still use every segment). Returns (azimuth_deg, distance_m).
     """
     lon = np.asarray(lon, dtype=float)
     lat = np.asarray(lat, dtype=float)
@@ -22,7 +30,7 @@ def segment_geodesics(lon, lat):
     az, _, dist = _GEOD.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
     az = np.atleast_1d(az) % 360.0
     dist = np.atleast_1d(dist)
-    keep = np.isfinite(dist) & (dist > 0)
+    keep = np.isfinite(az) & np.isfinite(dist) & (dist >= min_length)
     return az[keep], dist[keep]
 
 
@@ -56,7 +64,7 @@ def endpoint_bearing(lon, lat):
     if lon.size < 2:
         return np.nan
     az, _, dist = _GEOD.inv(lon[0], lat[0], lon[-1], lat[-1])
-    return float(az % 360.0) if dist > 0 else np.nan
+    return float(az % 360.0) if np.isfinite(dist) and dist >= MIN_SEGMENT_LENGTH_M else np.nan
 
 
 def bearing_to_math(bearing_deg):
@@ -65,8 +73,84 @@ def bearing_to_math(bearing_deg):
 
 
 def line_length_geodesic(lon, lat):
-    """Total geodesic length (m) of the centroid trajectory."""
-    return float(np.sum(segment_geodesics(lon, lat)[1]))
+    """Total geodesic length (m) of the centroid trajectory (all segments)."""
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+    if lon.size < 2:
+        return 0.0
+    _, _, dist = _GEOD.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    dist = np.atleast_1d(dist)
+    return float(np.sum(dist[np.isfinite(dist)]))
+
+
+def coherence_test(lon, lat, n_sim=10_000, seed=None, min_segments=3, alpha=0.05,
+                   refine_n_sim=200_000, refine_se=3.0):
+    """
+    Directional-coherence test of one lon/lat centroid track (geodesic segments, WGS84).
+
+    Uses the defined segments only (see ``segment_geodesics``) and runs the length-weighted
+    Rayleigh test with a Monte Carlo null conditional on the segment lengths
+    (``stats.circular.weighted_rayleigh_test``), plus the classical unweighted Rayleigh test
+    for reference. Borderline cases, whose Monte Carlo p-value lies within ``refine_se``
+    standard errors of ``alpha``, are recomputed with ``refine_n_sim`` replicates
+    (``refine_n_sim=0`` disables this). Tracks with fewer than ``min_segments`` defined
+    segments are not tested.
+
+    The classification describes directional concentration of the hourly movements; it
+    is not a test of trajectory straightness or of tracking accuracy.
+
+    Returns a dict with n_segments, r_weighted, p_weighted, n_sim_used, r_unweighted,
+    p_unweighted, tested, coherent.
+    """
+    az, dist = segment_geodesics(lon, lat)
+    n = int(az.size)
+    out = {"n_segments": n, "r_weighted": np.nan, "p_weighted": np.nan, "n_sim_used": 0,
+           "r_unweighted": np.nan, "p_unweighted": np.nan, "tested": False, "coherent": False}
+    if n == 0:
+        return out
+    theta = np.radians(np.asarray(bearing_to_math(az), dtype=float))
+    out["r_weighted"] = float(np.hypot(np.sum(dist * np.cos(theta)), np.sum(dist * np.sin(theta))) / dist.sum())
+    R_u = np.hypot(np.sum(np.cos(theta)), np.sum(np.sin(theta)))
+    out["r_unweighted"] = float(R_u / n)
+    if n < min_segments:
+        return out
+    rng = np.random.default_rng(RAYLEIGH_BASE_SEED if seed is None else seed)
+    _, p_w = weighted_rayleigh_test(theta, dist, n_sim=n_sim, rng=rng)
+    n_used = n_sim
+    if refine_n_sim and abs(p_w - alpha) < refine_se * np.sqrt(alpha * (1 - alpha) / n_sim):
+        _, p_w = weighted_rayleigh_test(theta, dist, n_sim=refine_n_sim, rng=rng)
+        n_used = refine_n_sim
+    out["p_weighted"] = p_w
+    out["n_sim_used"] = n_used
+    out["p_unweighted"] = float(rayleigh_p_unweighted(n, R_u))
+    out["tested"] = True
+    out["coherent"] = bool(p_w < alpha)
+    return out
+
+
+def select_analysis_window(values, max_positions=12):
+    """
+    Analysis window of a tracked storm: at most ``max_positions`` consecutive hourly fields.
+
+    A track with ``max_positions`` or fewer positions is kept in full; a longer track is
+    reduced to the ``max_positions`` consecutive fields with the largest sum of ``values``
+    (the hourly ellipse-mean precipitation), the first such window if several tie.
+
+    Returns (start, end) with ``end`` EXCLUSIVE, so ``values[start:end]`` holds the analysed
+    fields and the same slice is used for the centroids, times, intensity and area.
+
+    Replaces ``get_max_accumulated_value(series, '12H')`` in the pipeline: that window
+    included both ends (13 hourly fields) while the centroids were sliced ``[start:end]``,
+    so the last centroid of every window was dropped, and intensity and area used one
+    field more than the trajectory.
+    """
+    v = np.nan_to_num(np.asarray(values, dtype=float))
+    n = v.size
+    if n <= max_positions:
+        return 0, n
+    sums = np.convolve(v, np.ones(max_positions), mode="valid")   # sums[i] = v[i:i + max_positions].sum()
+    start = int(np.argmax(sums))
+    return start, start + max_positions
 
 
 def mean_speed_geodesic(lon, lat):
