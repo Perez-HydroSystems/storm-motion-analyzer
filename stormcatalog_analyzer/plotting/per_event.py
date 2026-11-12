@@ -225,7 +225,7 @@ def plot_storm_track(storm_tracking_results, storm_name, storm_trajectories, sav
     # Set axis labels and title
     ax[0].set_xlabel("Longitude")
     ax[0].set_ylabel("Latitude")
-    title = str(event_dict['selected_storm_time_steps'].values[end_time_index])
+    title = str(event_dict['selected_storm_time_steps'].values[end_time_index - 1])  # end index is exclusive
     ax[0].set_title(f'Storm Event {n_storm} at Time {title}', fontsize=14)
     ax[0].legend()
 
