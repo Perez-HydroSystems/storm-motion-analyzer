@@ -4,6 +4,7 @@ Usage::
 
     stormcatalog-analyzer diagnostics --config configs/testing_data.json
     stormcatalog-analyzer event       --config configs/testing_data.json --storm 100
+    stormcatalog-analyzer drift       --config configs/testing_data.json --axis 156
 
 The root helper ``run_diagnostics.py`` defaults to the ``diagnostics`` subcommand,
 so ``python run_diagnostics.py --config configs/testing_data.json`` also works.
@@ -14,7 +15,7 @@ import argparse
 
 from .config import load_config
 
-SUBCOMMANDS = ("diagnostics", "event")
+SUBCOMMANDS = ("diagnostics", "event", "drift")
 
 
 def _apply_overrides(cfg, args):
@@ -43,6 +44,16 @@ def cmd_event(args) -> int:
     return 0
 
 
+def cmd_drift(args) -> int:
+    cfg = _apply_overrides(load_config(args.config), args)
+    if getattr(args, "axis", None) is not None:
+        cfg.drift.axis_azimuth_deg = args.axis
+    from .pipeline import run_drift
+
+    run_drift(cfg, verbose=not args.quiet)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stormcatalog-analyzer",
@@ -66,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--storm", required=True,
                    help="Storm filename, unique substring, or numeric id (e.g. 100).")
     p.set_defaults(func=cmd_event)
+
+    p = sub.add_parser("drift", help="Envelope drift of the rain field for every catalog event.")
+    _common(p)
+    p.add_argument("--axis", type=float, help="Reference axis azimuth (compass deg) for along-axis drift.")
+    p.set_defaults(func=cmd_drift)
 
     return parser
 

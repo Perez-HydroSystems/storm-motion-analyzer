@@ -12,7 +12,8 @@ JSON layout (see ``configs/testing_data.json``)::
       "selection": { "min_duration_hr": 5, "min_area_fraction": 0.05 },
       "motion":    { "intensity_window_hr": 12, "min_positions": 5, "n_trajectories_plotted": 100 },
       "coherence": { "n_sim": 10000, "alpha": 0.05, "min_segments": 3, ... },
-      "figure":    { "font_size": 0, "dpi": 300, "smooth_factor": 0.05 }
+      "figure":    { "font_size": 0, "dpi": 300, "smooth_factor": 0.05 },
+      "drift":     { "block_hr": 6, "min_step_frac": 0.02, "window_hr": 72, "axis_azimuth_deg": null }
     }
 """
 from __future__ import annotations
@@ -91,6 +92,17 @@ class DirectionGridConfig:
 
 
 @dataclass
+class DriftConfig:
+    """Envelope drift of the rain field (``motion.drift``; ``pipeline.summarize_drift``)."""
+    block_hr: int = 6                          # centroid blocks (hours)
+    min_step_frac: float = 0.02                # keep blocks with >= this fraction of the event total
+    window_hr: Optional[int] = 72              # also fit the wettest window of this length (None = skip)
+    axis_azimuth_deg: Optional[float] = None   # reference axis (compass deg) for along/cross components
+    projected_crs: str = "EPSG:5070"           # equal-area CRS for the centroids
+    mask_path: Optional[str] = None            # optional polygon; centroids use only rain inside it
+
+
+@dataclass
 class Config:
     io: IOConfig
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
@@ -99,6 +111,7 @@ class Config:
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
     figure: FigureConfig = field(default_factory=FigureConfig)
     direction_grid: DirectionGridConfig = field(default_factory=DirectionGridConfig)
+    drift: DriftConfig = field(default_factory=DriftConfig)
     project_root: str = "."
 
     # --- path resolution -------------------------------------------------
@@ -174,6 +187,12 @@ class Config:
             errors.append("direction_grid.n_sectors must be >= 2")
         if self.direction_grid.cell_size_km <= 0:
             errors.append("direction_grid.cell_size_km must be > 0")
+        if self.drift.block_hr <= 0:
+            errors.append("drift.block_hr must be > 0")
+        if not (0 <= self.drift.min_step_frac < 1):
+            errors.append("drift.min_step_frac must be in [0, 1)")
+        if self.drift.window_hr is not None and self.drift.window_hr < 2 * self.drift.block_hr:
+            errors.append("drift.window_hr must be None or >= 2 * drift.block_hr")
         if not self.catalog_dir.exists():
             errors.append(f"io.catalog_dir does not exist: {self.catalog_dir}")
         if errors:
@@ -204,6 +223,7 @@ def from_dict(data: dict, project_root: Optional[str] = None) -> Config:
         coherence=_section(CoherenceConfig, data.get("coherence", {})),
         figure=_section(FigureConfig, data.get("figure", {})),
         direction_grid=_section(DirectionGridConfig, data.get("direction_grid", {})),
+        drift=_section(DriftConfig, data.get("drift", {})),
         project_root=project_root or data.get("project_root", "."),
     )
     return cfg.validate()
