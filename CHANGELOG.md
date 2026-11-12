@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Test suite** (`pytest`, `pip install -e .[test]`). `tests/test_regression_v6.py` runs the pipeline on `testing_data` (51 Iowa events) and checks it against the paper's V6 tracking code (`Storm_Motion_CONUS` @ e00e55b, fixture `tests/fixtures/v6_reference_testing_data_B7test.csv`): same retained events, analysed windows and coherence classes, motion descriptors equal to 1e-9. `tests/test_coherence_window.py` checks the analysis window and the coherence test (straight track coherent, U-turn not, zero-length segments dropped, seeded reproducibility, null calibration).
 - **Envelope drift of the rain field** (`motion.drift`, `pipeline.summarize_drift` /
   `generate_drift_diagnostics` / `run_drift`, CLI `stormcatalog-analyzer drift [--axis AZ]`).
   The slow, sustained displacement of the whole rain field over an event, as opposed to
