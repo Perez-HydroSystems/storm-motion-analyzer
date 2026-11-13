@@ -605,6 +605,17 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
                 raise ValueError(cfg.jump_rule)
         if n_big >= cfg.min_duration_hr and len(hours):
             d = v6_descriptors(rain0, labels, k, hours, fld.lat, fld.lon, fld.times, seed_key, cfg)
+            for _ in range(3):   # v1: the analysed window must itself be jump-free (jumps judged on the window)
+                if cfg.jump_rule != "split" or d is None or d["n_jumps"] == 0:
+                    break
+                segs = jump_segments(d["track_lon"], d["track_lat"], cfg)
+                a, b = max(segs, key=lambda ab: ab[1] - ab[0])
+                if b - a < cfg.min_positions:
+                    d = None
+                    break
+                hours = d["_win_hours"][a:b]
+                row["track_hours_split"] = int(len(hours))
+                d = v6_descriptors(rain0, labels, k, hours, fld.lat, fld.lon, fld.times, seed_key, cfg)
             if d is not None:
                 wh = d.pop("_win_hours")
                 row["retained"] = True
