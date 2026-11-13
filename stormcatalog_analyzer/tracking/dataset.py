@@ -22,7 +22,11 @@ def compute_pixel_area(lon_array, lat_array):
     return np.cos(lat_array * np.pi / 180) * 111 * 111 * lat_cell_degree * lon_cell_degree
 
 def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_threshold = 0.2, var_name = 'rain',
-                         ratio_threshold = 0.2, dry_spell_time = 0, area_fraction = 0.05):
+                         ratio_threshold = 0.2, dry_spell_time = 0, area_fraction = 0.05,
+                         linking = None, core_threshold = None):
+    """V6 identification and tracking of one catalog event. ``linking`` (a tracking.robust preset name, a dict of
+    LinkingConfig fields or a LinkingConfig) and ``core_threshold`` select the robust options; with both None the
+    V6 code path (tracking.track) is used unchanged."""
 
     # extract basic attributes of the raw data
     # time variables dimension (350, 72)
@@ -40,7 +44,12 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
     # parameters: 
     # morph_radius: used to connect isolated precipitation areas if they are close to each other. 
     # high_threshold: remove precipitation grids with value below this threshold in the identification
-    identification_array = storm_identification.storm_area_identification(rain_array, morph_radius, high_threshold)
+    if core_threshold is None:
+        identification_array = storm_identification.storm_area_identification(rain_array, morph_radius, high_threshold)
+    else:
+        from . import robust as storm_robust
+        identification_array = storm_robust.core_identification(np.nan_to_num(np.asarray(rain_array, float)),
+                                                                core_threshold, high_threshold, morph_radius)
 
     # The second step is tracking, it tracks the storm area over time
     # parameters:
@@ -48,7 +57,17 @@ def storm_tracking_event(rain_dataset, storm_dict, morph_radius = 4, high_thresh
     # dry_spell_time: if the tracking algorithm can't find a suitable object at t, it will search at t+1 for potential suitable object
     # I suggest using dry spell time as zero. Because if the storm loses its tracking in the next time step, it is difficult to
     # calculate correct direction and moving distance
-    track_array = storm_tracking.track(identification_array, ratio_threshold=ratio_threshold, dry_spell_time=dry_spell_time)
+    if linking is None and core_threshold is None:
+        track_array = storm_tracking.track(identification_array, ratio_threshold=ratio_threshold, dry_spell_time=dry_spell_time)
+    else:
+        from . import robust as storm_robust
+        if isinstance(linking, str):
+            lk = storm_robust.preset(linking, ratio_threshold=ratio_threshold, dry_spell_time=dry_spell_time)
+        else:
+            lk = storm_robust.LinkingConfig(**{**(storm_robust.LinkingConfig.from_any(linking).to_dict()),
+                                              "ratio_threshold": ratio_threshold, "dry_spell_time": dry_spell_time})
+        track_array = storm_robust.track_robust(identification_array, np.nan_to_num(np.asarray(rain_array, float)),
+                                                np.asarray(storm_catalog_latitude[:]), np.asarray(storm_catalog_longitude[:]), lk)
     #Based on the tracking array, we find out the longest, continous storm event during this period
     # longest_event_label: each continous storm is labeled with a unique number, we find out this number for the longest storm we want
     # area_fraction: at one step, the storm area should be greater than this fraction (default 5%) of the entire domain to be counted in its duration
