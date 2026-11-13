@@ -488,6 +488,8 @@ def v6_descriptors(rain0, labels, k, hours, lat, lon, times, seed_key, cfg: Enla
         "p_weighted": coh.get("p_weighted", np.nan), "r_weighted": coh.get("r_weighted", np.nan),
         "n_segments": coh.get("n_segments", 0), "n_sim_used": coh.get("n_sim_used", 0),
         "mean_intensity_mmh": float(m["intensity"]), "peak_intensity_mmh": float(m["peak_intensity"]),
+        # V6 'mean_intensity': temporal mean of the hourly area-weighted mean rate of the core over the window
+        "avg_intensity_mmh": float(np.mean(np.asarray(storm["storm_record"]["avg_prcp(mm/h)"])[s:e])),
         "storm_area_km2": float(m["area"]), "ellipse_area_km2": float(m["ellipse_area_km2"]),
         "major_axis_km": float(m["major_km"]), "minor_axis_km": float(m["minor_km"]),
         "ellipse_angle_deg": float(m["ellipse_angle"]),

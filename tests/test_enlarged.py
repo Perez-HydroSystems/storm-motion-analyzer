@@ -85,6 +85,9 @@ def test_tile_descriptors_reproduce_v6_reference():
     np.testing.assert_allclose(df["tile_angular_variance"], ref["angular_variance_weighted"], rtol=1e-9, atol=1e-12)
     np.testing.assert_allclose(df["tile_path_speed_ms"], ref["storm_velocity"], rtol=1e-9)
     np.testing.assert_allclose(df["tile_p_weighted"], ref["p_weighted"], rtol=1e-9)
+    np.testing.assert_allclose(df["tile_avg_intensity_mmh"], ref["mean_intensity"], rtol=1e-9)
+    np.testing.assert_allclose(df["tile_mean_intensity_mmh"], ref["mean_intensity_ellipse"], rtol=1e-6)
+    np.testing.assert_allclose(df["tile_storm_area_km2"], ref["area"], rtol=1e-9)
     d = (df["tile_direction_deg"].values - ref["storm_direction"].values + 180) % 360 - 180
     assert np.nanmax(np.abs(d)) < 1e-9
     # circle-selected storm on the tile is mostly the V6 storm, and its rain never leaves the tile
