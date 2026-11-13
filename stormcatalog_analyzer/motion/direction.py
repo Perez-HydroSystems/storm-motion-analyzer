@@ -196,14 +196,15 @@ def mean_direction(x, y):
 def mean_direction_weighted(x, y):
     """
     Weighted mean direction of successive vectors defined by points (x[i], y[i]) -> (x[i+1], y[i+1]).
-    Weights are the segment lengths. Returns (mean_angle_deg, Rw, angle_variance).
+    Weights are the segment lengths. Returns (mean_angle_deg, angle_variance); (nan, nan) when fewer than two
+    points or no segment of non-zero length (previously a 3-tuple there, which broke the callers' unpacking).
 
     Rw in [0,1] is the (weighted) mean resultant length; angle_variance = 1 - Rw.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size < 2:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan
 
     dx = np.diff(x)
     dy = np.diff(y)
@@ -215,7 +216,7 @@ def mean_direction_weighted(x, y):
     # guard against zero-length segments
     mask = w > 0
     if not np.any(mask):
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan
     theta = theta[mask]
     w = w[mask]
 

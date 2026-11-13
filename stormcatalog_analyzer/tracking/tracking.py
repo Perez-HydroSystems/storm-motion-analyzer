@@ -231,3 +231,65 @@ def single_event_selection(track_array, area_portion_threshold=0.05):
     longest_duration = np.max(event_duration_list)
 
     return longest_event_label, longest_duration
+
+
+def track_fast(grown_array: np.ndarray, ratio_threshold: float, dry_spell_time: int):
+    """Vectorised equivalent of ``track`` (identical output, including its label bookkeeping).
+
+    ``track`` scans, for every storm object at t, every storm of t - back_step with whole-field array operations,
+    which grows with (number of objects) x (field size) and dominates the run time on large domains. Here the
+    overlap of every (current object, previous storm) pair comes from one joint histogram per time step; the
+    matching rule is unchanged: the previous storm with the largest A/S_t + A/S_prev (ties: the lowest label,
+    as the ascending scan with a strict '>' in ``storm_match``) is linked if that sum exceeds
+    ``ratio_threshold``; otherwise the object starts a new storm, numbered from the running maximum label
+    (at t = 1 from the maximum label at t = 1 itself, as in ``track``). Labels are made sequential at the end.
+    """
+    grown = np.asarray(grown_array)
+    nt = grown.shape[0]
+    g_int = grown.astype(np.int64)
+    result = g_int.copy()
+    for t in range(1, nt):
+        g = g_int[t]
+        cur = np.unique(g)
+        cur = cur[cur != 0]
+        if t == 1:
+            max_label = int(result[1].max())
+        else:
+            max_label = int(result[:t].max())
+        if cur.size == 0:
+            continue
+        gf = g.ravel()
+        curr_size = np.bincount(gf, minlength=int(gf.max()) + 1)
+        mapping = {}
+        unmatched = set(int(c) for c in cur)
+        steps = range(1, dry_spell_time + 2) if t >= dry_spell_time + 1 else range(1, 2)
+        for back in steps:
+            if not unmatched:
+                break
+            pf = result[t - back].ravel()
+            prev_size = np.bincount(pf, minlength=int(pf.max()) + 1)
+            m = (gf > 0) & (pf > 0)
+            if not m.any():
+                continue
+            K = int(pf.max()) + 1
+            code, cnt = np.unique(gf[m] * K + pf[m], return_counts=True)
+            cc, pp = code // K, code % K
+            ratio = cnt / curr_size[cc] + cnt / prev_size[pp]
+            order = np.lexsort((pp, -ratio, cc))          # by current label, best ratio first, lowest prev label
+            cc, pp, ratio = cc[order], pp[order], ratio[order]
+            first = np.r_[True, cc[1:] != cc[:-1]]
+            for c, p, r in zip(cc[first], pp[first], ratio[first]):
+                c = int(c)
+                if c in unmatched and r > ratio_threshold:
+                    mapping[c] = int(p)
+                    unmatched.discard(c)
+        for c in cur:                                      # new storms numbered in ascending label order
+            c = int(c)
+            if c not in mapping:
+                max_label += 1
+                mapping[c] = max_label
+        lut = np.zeros(int(g.max()) + 1, dtype=np.int64)
+        for c, v in mapping.items():
+            lut[c] = v
+        result[t] = lut[g]
+    return relabel_sequential(result)[0]
