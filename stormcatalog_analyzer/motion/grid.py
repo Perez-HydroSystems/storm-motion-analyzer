@@ -138,9 +138,20 @@ def build_storm_motion_grid(
     extent=None,
     include_empty_cells=False,
     require_cells_inside=False,
+    motion_source="ellipse",
+    window=None,
+    min_segment_length_m=0.0,
 ):
     """
     Create a projected grid and assign storm-motion direction to cells inside each ellipse.
+
+    ``motion_source="centroid"`` takes the direction of motion from the precipitation-weighted
+    storm centroids (the trajectory used for the storm-motion statistics) instead of the
+    ellipse centres; ``window=(start, end)`` restricts the storm to its analysed window of
+    hourly fields (end exclusive, as ``motion.direction.select_analysis_window``);
+    ``min_segment_length_m`` treats steps shorter than that (m) as zero-length (no direction).
+    The cells are always those whose centre lies inside the fitted ellipse at time t. The
+    defaults reproduce the earlier behaviour.
 
     A cell receives the direction from the current ellipse centroid to the next
     ellipse centroid when the cell center is inside the current time-step ellipse.
@@ -193,7 +204,14 @@ def build_storm_motion_grid(
     if missing:
         raise KeyError(f"event_dict is missing required keys: {sorted(missing)}")
 
+    if motion_source not in ("ellipse", "centroid"):
+        raise ValueError("motion_source must be 'ellipse' or 'centroid'")
     record = event_dict["storm_record"].reset_index(drop=True)
+    times_all = np.asarray(event_dict["selected_storm_time_steps"].values)
+    if window is not None:
+        w0, w1 = int(window[0]), int(window[1])
+        record = record.iloc[w0:w1].reset_index(drop=True)
+        times_all = times_all[w0:w1]
     n_times = len(record)
     if n_times < 2:
         raise ValueError("At least two storm time steps are required")
@@ -226,28 +244,34 @@ def build_storm_motion_grid(
     step_distance_m = np.full(n_motion_steps, np.nan, dtype=float)
 
     records = []
-    times = np.asarray(event_dict["selected_storm_time_steps"].values)
+    times = times_all
 
-    # geodesic bearing/distance of every centroid-to-centroid step
+    # positions whose step defines the direction of motion: ellipse centres or the
+    # precipitation-weighted centroids (projected columns of the storm_record)
+    pos_x_col = "ellipse_cent_prj_lon(m)" if motion_source == "ellipse" else "cen_prj_lon(m)"
+    pos_y_col = "ellipse_cent_prj_lat(m)" if motion_source == "ellipse" else "cen_prj_lat(m)"
+
+    # geodesic bearing/distance of every position-to-position step
     cent_lon, cent_lat = _PCS_TO_GCS.transform(
-        record["ellipse_cent_prj_lon(m)"].to_numpy(dtype=float),
-        record["ellipse_cent_prj_lat(m)"].to_numpy(dtype=float),
+        record[pos_x_col].to_numpy(dtype=float),
+        record[pos_y_col].to_numpy(dtype=float),
     )
     step_az, _, step_dist = _GEOD.inv(cent_lon[:-1], cent_lat[:-1], cent_lon[1:], cent_lat[1:])
     step_az = np.atleast_1d(step_az)
     step_dist = np.atleast_1d(step_dist)
 
     for t in range(n_motion_steps):
-        cx = record.loc[t, "ellipse_cent_prj_lon(m)"]
-        cy = record.loc[t, "ellipse_cent_prj_lat(m)"]
-        nx = record.loc[t + 1, "ellipse_cent_prj_lon(m)"]
-        ny = record.loc[t + 1, "ellipse_cent_prj_lat(m)"]
+        cx = record.loc[t, pos_x_col]
+        cy = record.loc[t, pos_y_col]
+        nx = record.loc[t + 1, pos_x_col]
+        ny = record.loc[t + 1, pos_y_col]
 
         dx = nx - cx
         dy = ny - cy
         grid_distance_m = np.hypot(dx, dy)
         distance_m = step_dist[t]
-        if distance_m == 0 or not np.isfinite(distance_m) or grid_distance_m == 0:
+        if (not np.isfinite(distance_m) or distance_m <= 0 or distance_m < min_segment_length_m
+                or grid_distance_m == 0):
             theta = np.nan
             bearing = np.nan
             unit_u = np.nan
@@ -258,11 +282,12 @@ def build_storm_motion_grid(
             unit_u = dx / grid_distance_m
             unit_v = dy / grid_distance_m
 
+        # the footprint is always the fitted ellipse at time t
         mask = _ellipse_mask(
             x_grid,
             y_grid,
-            cx,
-            cy,
+            record.loc[t, "ellipse_cent_prj_lon(m)"],
+            record.loc[t, "ellipse_cent_prj_lat(m)"],
             record.loc[t, "major_axis_length(m)"],
             record.loc[t, "minor_axis_length(m)"],
             record.loc[t, "ellipse_angle (degree)"],
@@ -591,6 +616,7 @@ def calculate_direction_probability_field(
 
     bin_counts = np.zeros((len(angle_ranges), n_rows, n_cols), dtype=int)
     total_counts = np.zeros((n_rows, n_cols), dtype=int)
+    storm_counts = np.zeros((n_rows, n_cols), dtype=int)   # distinct storms with at least one sample
     direction_key = "bearing_deg" if use_bearing else "direction_deg"
 
     for motion_grid in motion_grids:
@@ -600,6 +626,7 @@ def calculate_direction_probability_field(
         directions = np.asarray(motion_grid[direction_key], dtype=float)
         valid = np.isfinite(directions) & np.asarray(motion_grid["inside_ellipse"], dtype=bool)
         total_counts += valid.sum(axis=0)
+        storm_counts += valid.any(axis=0)
 
         for bin_index, (angle_min, angle_max) in enumerate(angle_ranges):
             in_range = _angle_range_mask(directions, angle_min, angle_max) & valid
@@ -619,6 +646,7 @@ def calculate_direction_probability_field(
         "probability": probability,
         "bin_counts": bin_counts,
         "total_counts": total_counts,
+        "storm_counts": storm_counts,
         "x_edges": x_edges,
         "y_edges": y_edges,
         "x_centers": x_centers,

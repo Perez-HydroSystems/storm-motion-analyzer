@@ -11,6 +11,7 @@ copy-pasted across the notebooks.
 """
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -19,7 +20,7 @@ import numpy as np
 import pandas as pd
 from pyproj import Transformer
 
-from .config import Config
+from .config import CoherenceConfig, Config
 from . import io as scio
 from .tracking.dataset import (
     storm_tracking_event,
@@ -28,7 +29,8 @@ from .tracking.dataset import (
 )
 from .motion.direction import (
     mean_precipitation_within_ellipse,
-    get_max_accumulated_value,
+    select_analysis_window,
+    coherence_test,
     compute_line_length,
     mean_velocity,
     mean_direction,
@@ -120,27 +122,36 @@ class MotionSummary:
     mean_p: float
 
 
-def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> Optional[dict]:
-    """Compute one storm's most-intense-window trajectory + direction/speed.
+def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0, min_positions: int = 2,
+                             coherence: Optional[CoherenceConfig] = None,
+                             seed_key: Optional[str] = None) -> Optional[dict]:
+    """Compute one storm's analysed-window trajectory + direction/speed (+ coherence test).
 
-    ``window_hr`` is the most-intense-window length in hours (``motion.intensity_window_hr``).
+    The analysed window holds at most ``window_hr`` consecutive hourly fields
+    (``motion.intensity_window_hr``); longer tracks are reduced to the window with the
+    largest sum of hourly in-ellipse mean rainfall (``select_analysis_window``). The
+    window end index is EXCLUSIVE and the same slice is used for the centroids, times,
+    intensity, area and ellipse properties. Windows with fewer than ``min_positions``
+    centroid positions return None.
+
+    If ``coherence`` is given, the directional-coherence test (length-weighted Rayleigh
+    test with a Monte Carlo null) is run on the window, with a reproducible seed built from
+    ``coherence.seed`` and ``seed_key`` (e.g. ``"<domain>/<event>"``).
+
     Side effect: writes the per-storm motion metrics back into ``storm`` (the
     event_dict) because the per-event plots read them from there. Returns the public
-    trajectory dict (with a private ``_metrics`` key) or None if the storm has no
-    valid (>= 2 centroid) trajectory.
+    trajectory dict (with a private ``_metrics`` key) or None.
     """
     mean_p_ellipse = mean_precipitation_within_ellipse(storm)
     if np.nanmin(mean_p_ellipse) < 0:
         return None
-    series = pd.Series(mean_p_ellipse, index=storm["selected_storm_time_steps"].values)
-    window = pd.to_timedelta(window_hr, unit="h")
-    _, _, _, start_idx, end_idx = get_max_accumulated_value(series, window)
+    start_idx, end_idx = select_analysis_window(mean_p_ellipse, max_positions=int(window_hr))
 
     x = storm["storm_prj_lon_cent_list"][start_idx:end_idx]
     y = storm["storm_prj_lat_cent_list"][start_idx:end_idx]
     lon = np.asarray(storm["storm_lon_cent"][start_idx:end_idx], dtype=float)
     lat = np.asarray(storm["storm_lat_cent"][start_idx:end_idx], dtype=float)
-    if len(x) < 2:
+    if len(x) < max(2, int(min_positions)):
         return None
 
     # motion metrics: geodesic on WGS84, relative to true north. Computed as compass
@@ -167,9 +178,17 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
     storm["mean_direction_ln"] = lm
     storm["mean_direction_weighted"] = wd
     storm["var_dir_weighted"] = wv
+    storm["analysis_window"] = (int(start_idx), int(end_idx))   # end exclusive
 
-    # aggregate per-storm intensity and ellipse properties over the most-intense window
-    win = slice(start_idx, end_idx + 1)
+    coh = None
+    if coherence is not None:
+        seed = [coherence.seed, zlib.crc32((seed_key or str(storm_id)).encode())]
+        coh = coherence_test(lon, lat, n_sim=coherence.n_sim, seed=seed, min_segments=coherence.min_segments,
+                             alpha=coherence.alpha, refine_n_sim=coherence.refine_n_sim)
+        storm["coherence"] = coh
+
+    # aggregate per-storm intensity and ellipse properties over the same analysed window
+    win = slice(start_idx, end_idx)
     record = storm["storm_record"]
     max_p = np.asarray(record["max_prcp(mm/h)"])[win]
     major = np.asarray(record["major_axis_length(m)"])[win]
@@ -200,10 +219,15 @@ def compute_storm_trajectory(storm: dict, window_hr: int, storm_id: int = 0) -> 
             "trajectory_length_km": trajectory_length_m / 1000.0,
             "major_km": float(np.nanmean(major)) / 1000.0,
             "minor_km": float(np.nanmean(minor)) / 1000.0,
+            # hourly ellipse area pi * (major/2) * (minor/2), averaged over the window (km^2)
+            "ellipse_area_km2": float(np.nanmean(np.pi * (major / 2) * (minor / 2))) / 1e6,
             "ellipse_angle": _axial_mean_deg(angle),
-            "duration_hours": int(end_idx - start_idx + 1),
+            "n_positions": int(end_idx - start_idx),
+            "track_positions": int(len(storm["storm_lon_cent"])),
+            "duration_hours": int(end_idx - start_idx - 1),
             "start_time": times[start_idx].values,
-            "end_time": times[end_idx].values,
+            "end_time": times[end_idx - 1].values,
+            "coherence": coh,
         },
     }
 
@@ -212,6 +236,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
     """Compute per-storm direction/speed/trajectory and catalog-level aggregates."""
     results = {k: v for k, v in results.items() if v}
     window_hr = cfg.motion.intensity_window_hr
+    domain = cfg.io.domain_name
 
     storm_trajectories: dict = {}
     storm_mean_velocity: list = []
@@ -221,7 +246,8 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
 
     for i, (name, storm) in enumerate(results.items()):
         sid = _parse_storm_id(name, i)
-        traj = compute_storm_trajectory(storm, window_hr, storm_id=sid)
+        traj = compute_storm_trajectory(storm, window_hr, storm_id=sid, min_positions=cfg.motion.min_positions,
+                                        coherence=cfg.coherence, seed_key=f"{domain}/{name}")
         if traj is None:
             continue
         m = traj.pop("_metrics")
@@ -229,22 +255,37 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
         storm_mean_velocity.append(m["v"])
         storm_mean_bearing.append(m["bearing"])
         storm_intensity.append(m["intensity"])
+        coh = m["coherence"] or {}
         property_rows.append({
             "storm_event": name,
             "storm_id": sid,
             "start_time": m["start_time"],
             "end_time": m["end_time"],
+            "n_positions": m["n_positions"],
             "duration_hours": m["duration_hours"],
+            "track_positions": m["track_positions"],
+            "truncated": m["track_positions"] > window_hr,
+            "window_start": traj["start_time_index"],
             "mean_speed_ms": m["v"],
             # directions reported counterclockwise from east (0 = E, 90 = N)
             "mean_direction_deg": float(bearing_to_math(m["bearing"])),
             "mean_direction_vector_deg": float(bearing_to_math(m["bearing_unw"])),
             "endpoint_direction_deg": float(bearing_to_math(m["bearing_ep"])),
             "angular_variance": m["bearing_var"],
+            # directional coherence (length-weighted Rayleigh test, Monte Carlo null)
+            "n_segments": coh.get("n_segments"),
+            "r_weighted": coh.get("r_weighted"),
+            "p_weighted": coh.get("p_weighted"),
+            "n_sim_used": coh.get("n_sim_used"),
+            "r_unweighted": coh.get("r_unweighted"),
+            "p_unweighted": coh.get("p_unweighted"),
+            "tested": coh.get("tested"),
+            "coherent": coh.get("coherent"),
             "mean_intensity_mmh": m["intensity"],
             "peak_intensity_mmh": m["peak_intensity"],
             "total_rainfall_mm": m["total_rainfall"],
             "storm_area_km2": m["area"],
+            "mean_ellipse_area_km2": m["ellipse_area_km2"],
             "trajectory_length_km": m["trajectory_length_km"],
             "mean_major_axis_km": m["major_km"],
             "mean_minor_axis_km": m["minor_km"],
@@ -257,7 +298,7 @@ def summarize_motion(results: Dict[str, dict], cfg: Config) -> MotionSummary:
         })
 
     if not storm_trajectories:
-        raise RuntimeError("No storms produced a valid trajectory (>=2 centroids).")
+        raise RuntimeError(f"No storms produced a valid trajectory (>= {cfg.motion.min_positions} positions).")
 
     # reproject trajectories to geographic coords
     geographic_trajectories: dict = {}
@@ -427,10 +468,12 @@ def track_one_event(cfg: Config, storm: str):
         ds.close()
 
     traj = compute_storm_trajectory(
-        event_dict, cfg.motion.intensity_window_hr, storm_id=_parse_storm_id(name, 0)
+        event_dict, cfg.motion.intensity_window_hr, storm_id=_parse_storm_id(name, 0),
+        min_positions=cfg.motion.min_positions, coherence=cfg.coherence,
+        seed_key=f"{cfg.io.domain_name}/{name}",
     )
     if traj is None:
-        raise RuntimeError(f"{name}: no valid trajectory (>= 2 centroids)")
+        raise RuntimeError(f"{name}: no valid trajectory (>= {cfg.motion.min_positions} positions)")
     traj.pop("_metrics", None)
     return {name: event_dict}, {name: traj}
 
@@ -549,6 +592,79 @@ def generate_all_event_diagnostics(cfg: Config, results: Dict[str, dict],
 
 
 # --------------------------------------------------------------------------
+# Envelope drift of the rain field (no tracking needed)
+# --------------------------------------------------------------------------
+def summarize_drift(cfg: Config, verbose: bool = True) -> pd.DataFrame:
+    """Envelope drift of every catalog event (``motion.drift.event_drift``), one row per event.
+
+    Reads each event's hourly field directly (no storm identification/tracking), so it covers
+    every event in the catalog. Settings come from ``cfg.drift``; if ``drift.mask_path`` is set,
+    the centroids use only the rain inside that polygon.
+    """
+    from .motion.drift import event_drift
+
+    dc = cfg.drift
+    mask_geom = None
+    if dc.mask_path:
+        gdf = scio.load_vector(cfg.resolve(dc.mask_path))
+        if gdf is None:
+            raise FileNotFoundError(f"drift.mask_path not found: {dc.mask_path}")
+        mask_geom = gdf.to_crs("EPSG:4326").union_all() if hasattr(gdf, "union_all") else gdf.to_crs("EPSG:4326").unary_union
+    rows = []
+    for i, path in enumerate(scio.discover_events(cfg)):
+        ds = scio.open_event(path, var_name=cfg.tracking.rainfall_var_name)
+        try:
+            da = ds[cfg.tracking.rainfall_var_name]
+            lat_name = "latitude" if "latitude" in da.dims else "lat"
+            lon_name = "longitude" if "longitude" in da.dims else "lon"
+            da = da.transpose(da.dims[0], lat_name, lon_name)
+            lat = ds[lat_name].values
+            lon = ds[lon_name].values
+            mask = None
+            if mask_geom is not None:
+                from shapely import contains_xy
+                lo2, la2 = np.meshgrid(lon, lat)
+                mask = contains_xy(mask_geom, lo2, la2)
+            rec = event_drift(da.values, lon, lat, block_hr=dc.block_hr, min_step_frac=dc.min_step_frac,
+                              window_hr=dc.window_hr, axis_azimuth_deg=dc.axis_azimuth_deg,
+                              crs=dc.projected_crs, mask=mask)
+            t = ds[da.dims[0]].values
+            rec = {"storm_event": path.name, "storm_id": _parse_storm_id(path.name, i),
+                   "start_time": t[0], **rec}
+            rows.append(rec)
+        finally:
+            ds.close()
+        if verbose and (len(rows) % 50 == 0):
+            print(f"  drift: {len(rows)} events")
+    if verbose:
+        print(f"Envelope drift computed for {len(rows)} events.")
+    return pd.DataFrame(rows)
+
+
+def generate_drift_diagnostics(drift_df: pd.DataFrame, cfg: Config, highlight: Optional[dict] = None) -> dict:
+    """Save ``storm_drift_<domain>.csv`` and the drift diagnostic figure; return their paths."""
+    from .plotting.drift import plot_drift_diagnostics
+
+    paths = scio.ensure_output_dirs(cfg)
+    domain = cfg.io.domain_name
+    csv_path = paths["base"] / f"storm_drift_{domain}.csv"
+    drift_df.to_csv(csv_path, index=False)
+    fig = plot_drift_diagnostics(drift_df, str(paths["base"]), domain, window_hr=cfg.drift.window_hr,
+                                 axis_azimuth_deg=cfg.drift.axis_azimuth_deg, highlight=highlight,
+                                 dpi=cfg.figure.dpi, font_size=cfg.figure.font_size)
+    return {"table": csv_path, "figures": [Path(fig)]}
+
+
+def run_drift(cfg: Config, verbose: bool = True) -> dict:
+    """Envelope drift of every event + its CSV and diagnostic figure."""
+    df = summarize_drift(cfg, verbose=verbose)
+    out = generate_drift_diagnostics(df, cfg)
+    if verbose:
+        print(f"Saved drift table:\n  {out['table']}\nSaved figure:\n  {out['figures'][0]}")
+    return {"drift": df, **out}
+
+
+# --------------------------------------------------------------------------
 # Storm-motion direction-probability field (grid diagnostic)
 # --------------------------------------------------------------------------
 def build_direction_probability_field(results: Dict[str, dict], cfg: Config,
@@ -557,7 +673,11 @@ def build_direction_probability_field(results: Dict[str, dict], cfg: Config,
 
     Builds one storm-motion grid per storm on a **shared** projected extent (so the
     grids align), then bins the directions into ``cfg.direction_grid.n_sectors`` sectors.
-    Grid resolution, sector count, and start angle come from ``cfg.direction_grid``.
+    Grid resolution, sector count, start angle, motion source (precipitation-weighted
+    centroids or ellipse centres), analysed-window restriction and minimum step length
+    come from ``cfg.direction_grid``. Samples are footprint hours (one per storm, hour and
+    cell), so the fields weight large and long-lived storms more and are conditional on a
+    footprint being present; ``storm_counts`` gives the distinct storms per cell.
     """
     from .motion.grid import build_storm_motion_grid, calculate_direction_probability_field
 
@@ -578,9 +698,17 @@ def build_direction_probability_field(results: Dict[str, dict], cfg: Config,
 
     motion_grids = []
     for name, event_dict in events.items():
+        window = None
+        if dg.use_analysis_window:
+            window = event_dict.get("analysis_window")
+            if window is None:
+                window = select_analysis_window(mean_precipitation_within_ellipse(event_dict),
+                                                max_positions=int(cfg.motion.intensity_window_hr))
         try:
             motion_grids.append(
-                build_storm_motion_grid(event_dict, cell_size_m=cell_size_km * 1000.0, extent=extent)
+                build_storm_motion_grid(event_dict, cell_size_m=cell_size_km * 1000.0, extent=extent,
+                                        motion_source=dg.motion_source, window=window,
+                                        min_segment_length_m=dg.min_segment_length_m)
             )
         except Exception as exc:  # a storm may have no cells inside any ellipse
             if verbose:

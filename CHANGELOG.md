@@ -7,7 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Test suite** (`pytest`, `pip install -e .[test]`). `tests/test_regression_v6.py` runs the pipeline on `testing_data` (51 Iowa events) and checks it against the paper's V6 tracking code (`Storm_Motion_CONUS` @ e00e55b, fixture `tests/fixtures/v6_reference_testing_data_B7test.csv`): same retained events, analysed windows and coherence classes, motion descriptors equal to 1e-9. `tests/test_coherence_window.py` checks the analysis window and the coherence test (straight track coherent, U-turn not, zero-length segments dropped, seeded reproducibility, null calibration).
+- **Envelope drift of the rain field** (`motion.drift`, `pipeline.summarize_drift` /
+  `generate_drift_diagnostics` / `run_drift`, CLI `stormcatalog-analyzer drift [--axis AZ]`).
+  The slow, sustained displacement of the whole rain field over an event, as opposed to
+  the storm-cell motion of the most-intense window. Method: 6-h block totals, their
+  rain-weighted centroids (EPSG:5070), blocks with at least 2% of the event total,
+  and a rain-weighted linear trend of x(t) and y(t). Reported for the whole event and for
+  its wettest `window_hr` hours (prefix `w{window_hr}_`). Outputs: velocity components,
+  speed, compass bearing and package-convention direction, track R², and (with
+  `drift.axis_azimuth_deg`) the along- and cross-axis components. Writes
+  `storm_drift_<domain>.csv` and `storm_drift_diagnostic_<domain>.png` (drift vectors, and
+  empirical CDFs of speed and along-axis drift). Reads each event directly, so every
+  catalog event is included (no tracking or selection). An optional `drift.mask_path`
+  restricts the centroids to a polygon. New config section `drift` (defaults: `block_hr` 6,
+  `min_step_frac` 0.02, `window_hr` 72, `axis_azimuth_deg` null, `projected_crs`
+  "EPSG:5070", `mask_path` null). Tests: `tests/test_drift.py` (synthetic translating storms).
+
+- **Directional-coherence test.** `stats.circular.weighted_rayleigh_test` (length-weighted
+  Rayleigh test with a Monte Carlo null conditional on the segment lengths; with equal weights it
+  reduces to the classical Rayleigh test), `stats.circular.rayleigh_p_unweighted`, and
+  `motion.direction.coherence_test`, which tests one centroid track (defined segments only,
+  borderline p-values refined with more replicates). `summarize_motion` runs it for every storm,
+  with a reproducible seed per `<domain_name>/<event>`, and the properties table gains
+  `n_segments`, `r_weighted`, `p_weighted`, `n_sim_used`, `r_unweighted`, `p_unweighted`,
+  `tested`, and `coherent`. New config section `coherence` (`n_sim`, `alpha`, `min_segments`,
+  `refine_n_sim`, `seed`). The classification describes how concentrated the hourly movement
+  directions are; it is not a test of trajectory straightness or tracking accuracy.
+- **Analysed-window columns** in the properties table: `n_positions`, `track_positions`
+  (whole continuous track), `truncated`, and `window_start`.
+- **Direction-probability field options.** `build_storm_motion_grid` accepts
+  `motion_source` (`"ellipse"` or `"centroid"`, the precipitation-weighted centroids of the
+  storm trajectory), `window` (restrict a storm to its analysed window), and
+  `min_segment_length_m`; `calculate_direction_probability_field` also returns `storm_counts`
+  (distinct storms per cell). `build_direction_probability_field` takes them from the new
+  `direction_grid` keys `motion_source`, `use_analysis_window`, and `min_segment_length_m`. The
+  function defaults reproduce the earlier behaviour.
+- `motion.min_positions` (default 5): analysed windows with fewer centroid positions are dropped.
+- `endpoint_direction_deg` (first-to-last centroid geodesic direction, CCW from E). Legacy
+  grid-plane columns `mean_direction_grid_deg`, `angular_variance_grid`,
+  `mean_speed_grid_ms`, `trajectory_length_grid_km` are kept for comparison.
+- `motion.direction`: `segment_geodesics`, `mean_bearing`, `endpoint_bearing`, `bearing_to_math`,
+  `line_length_geodesic`, `mean_speed_geodesic`.
+- `mean_ellipse_area_km2` in `storm_properties_<domain>.csv`: area of the fitted ellipse,
+  π·(major/2)·(minor/2), computed per time step and averaged over the most-intense window.
+  Unlike `storm_area_km2` (all tracked pixels ≥ the rainfall threshold), it describes the
+  storm core that the ellipse is fitted to (pixels above each step's median rainfall).
+
 ### Fixed
+
+- **The most-intense window dropped the last centroid and was one field longer for intensity
+  and area.** `get_max_accumulated_value(series, '12H')` selected an inclusive window of 13
+  hourly fields, while the centroids were sliced `[start:end]` (12 positions, so a track of
+  12 or fewer positions lost its last one) and intensity, area and ellipse properties used
+  `[start:end + 1]`. `compute_storm_trajectory` now uses `select_analysis_window`: at most
+  `intensity_window_hr` consecutive fields with the largest sum of in-ellipse mean rainfall,
+  end index exclusive, and the same slice for every descriptor. Effect on the 50 test storms
+  with the previous test settings (2 mm/h, 6 h): one more position in every window of a track
+  with 12 or fewer fields; mean direction changes by a median of 4.2° (more than 10° in 16
+  storms, up to 168° for tracks that turn back); trajectory length +8 % (median); speed,
+  angular variance, intensity and area unchanged in median but up to about ±20 % for
+  individual storms. The per-event figures already sliced `[start:end)`; the title of
+  `plot_storm_track` now shows the last field of the window.
+- **Repeated centroids produced spurious segment directions.** pyproj returns ~1e-10 m, not 0,
+  for two identical points, so `segment_geodesics` (`dist > 0`) kept these segments with an
+  arbitrary azimuth. Segments shorter than `MIN_SEGMENT_LENGTH_M = 1 m` now have no direction
+  (they still count for speed and track length; `line_length_geodesic` uses every segment).
+- **`circular_trend_permutation_test` underestimated the angular rate.** The rate multiplied
+  the U/V slopes by the unit mean vector, i.e. divided by the mean resultant length R̄ instead
+  of R̄²; it is now `(V̄ U′ − Ū V′) / (Ū² + V̄²)`. The result also reports
+  `mean_resultant_length` and `rate_stable` (R̄ ≥ 0.3), since the rate is unstable for widely
+  spread directions. p-values are unchanged.
 
 - **Moments ellipse fit (`fit_ellipse_to_rainfall`, the default `ellipse_fit_method = "moments"`)
   used inconsistent moments.** `m00` and the centroid were computed from the thresholded
@@ -44,6 +116,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Defaults follow the settings of the storm-motion paper (CONUS, AORC):**
+  `selection.min_duration_hr` 6 → 5, `direction_grid.cell_size_km` 50 → 20,
+  `direction_grid.motion_source = "centroid"`, `use_analysis_window = true`,
+  `min_segment_length_m = 1.0`, and `configs/testing_data.json` uses
+  `rainfall_threshold_mmhr = 0.5` (was 2) with these values. With the test catalog, all 51
+  events are retained (50 before) and 14 (27.5 %) are classified as directionally coherent.
+- **`duration_hours` is now the elapsed time between the first and last centroid of the window**
+  (`n_positions − 1`); it previously counted the fields of the inclusive window. `end_time` is
+  the time of the last field of the window.
+
 - **Storm-motion directions are now geodesic bearings relative to true north.**
   Before, directions came from `arctan2(dy, dx)` in the EPSG:2163 plane, so they
   were measured from *grid* north. That differs from true north by the local
@@ -59,14 +141,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assigns geodesic `bearing_deg`/`direction_deg`. `u`/`v` remain
   projected-plane unit vectors, used for drawing on EPSG:2163 maps.
 - Direction arrows on the lon/lat maps are drawn along the true bearing.
-
-### Added
-
-- `endpoint_direction_deg` (first-to-last centroid geodesic direction, CCW from E). Legacy
-  grid-plane columns `mean_direction_grid_deg`, `angular_variance_grid`,
-  `mean_speed_grid_ms`, `trajectory_length_grid_km` are kept for comparison.
-- `motion.direction`: `segment_geodesics`, `mean_bearing`, `endpoint_bearing`, `bearing_to_math`,
-  `line_length_geodesic`, `mean_speed_geodesic`.
 
 ## [1.0.0] - 2026-07-15
 

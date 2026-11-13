@@ -39,3 +39,9 @@ stormcatalog-analyzer = "stormcatalog_analyzer.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["stormcatalog_analyzer*"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
