@@ -167,3 +167,66 @@ def test_assign_system_ids():
     assert s["e"] == s["a"]
     assert not ((pairs["tile_a"] == pairs["tile_b"]).any())
     assert ids["system_id"].nunique() == 2
+
+
+# ------------------------------------------------------------------ jump variants
+def test_gated_tracker_with_open_gates_is_v6():
+    from stormcatalog_analyzer.enlarged import TRACKERS
+    rng = np.random.default_rng(3)
+    cfg = EnlargedConfig(max_link_speed_ms=1e9, mass_ratio=1e9, morph_radius_cells=1)
+    lat, lon = 35 + np.arange(70) / 30, -100 + np.arange(70) / 30
+    for _ in range(5):
+        r = np.clip(10 * ndimage.gaussian_filter(rng.standard_normal((10, 70, 70)), (0.8, 3, 3)), 0, None)
+        np.testing.assert_array_equal(TRACKERS["gated"](r, lat, lon, cfg), TRACKERS["v6"](r, lat, lon, cfg))
+
+
+def test_gated_tracker_breaks_teleporting_identity():
+    """Two blobs: A moves steadily; at t = 6 it merges into a large blob B 200 km away that overlaps A's last
+    footprint only through a thin bridge. V6 linking may carry A's id onto the merged object (a jump); the gate
+    must not let the identity move faster than 40 m/s."""
+    from stormcatalog_analyzer.enlarged import TRACKERS
+    n, nt = 200, 10
+    yy, xx = np.mgrid[0:n, 0:n]
+    rain = np.zeros((nt, n, n))
+    for t in range(nt):
+        cx = 40 + 3 * t
+        rain[t] += 10 * np.exp(-(((yy - 100) / 8) ** 2 + ((xx - cx) / 8) ** 2))
+        if t >= 6:   # large blob to the east, bridged to A
+            rain[t] += 30 * np.exp(-(((yy - 100) / 25) ** 2 + ((xx - 140) / 25) ** 2))
+            rain[t, 98:103, cx:140] = np.maximum(rain[t, 98:103, cx:140], 1.0)
+    lat, lon = 35 + np.arange(n) / 30, -100 + np.arange(n) / 30
+    cfg = EnlargedConfig(morph_radius_cells=1)
+    lab = TRACKERS["gated"](rain, lat, lon, cfg)
+    a = lab[5][100, 55]
+    from stormcatalog_analyzer.enlarged import _object_stats, _km
+    for t in range(1, nt):
+        for k in np.unique(lab[t]):
+            if k and (lab[t - 1] == k).any():
+                _, x0, y0 = _object_stats((lab[t - 1] == k).astype(int), rain[t - 1], lat, lon, 2)
+                _, x1, y1 = _object_stats((lab[t] == k).astype(int), rain[t], lat, lon, 2)
+                assert _km(x0[1], y0[1], x1[1], y1[1]) / 3.6 <= 40.0 + 1e-6
+    assert a > 0
+
+
+def test_jump_segments():
+    from stormcatalog_analyzer.enlarged import jump_segments
+    lon = np.r_[np.arange(6) * 0.1, 3.0 + np.arange(6) * 0.1]
+    lat = np.full(12, 40.0)
+    assert jump_segments(lon, lat, EnlargedConfig()) == [(0, 6), (6, 12)]
+    assert jump_segments(np.arange(8) * 0.1, np.full(8, 40.0), EnlargedConfig()) == [(0, 8)]
+
+
+def test_variants_share_tile_result():
+    fld, truth = _synthetic()
+    from stormcatalog_analyzer.enlarged import analyze_event
+    r0, c0 = int(truth[0][0]) - 60, int(truth[0][1]) - 40
+    yy, xx = np.mgrid[0:21, 0:21]
+    circle = ((yy - 10) ** 2 + (xx - 10) ** 2 <= 100).astype(float)
+    ev = CatalogEvent("SYN.nc_storm_1_20100601.nc", 1, 1, fld.times, fld.lat[r0:r0 + 150], fld.lon[c0:c0 + 150],
+                      20, 20, circle)
+    rows = {}
+    for v in ("v0", "v1", "v2"):
+        rows[v], _ = analyze_event(ev, fld, EnlargedConfig.variant(v, margin_deg=0), tile="SYN")
+        assert "_labels" not in rows[v] and "_tile" not in rows[v]
+    assert rows["v0"]["tile_direction_deg"] == rows["v2"]["tile_direction_deg"]
+    assert rows["v1"]["jump_rule"] == "split" and rows["v2"]["tracker"] == "gated"

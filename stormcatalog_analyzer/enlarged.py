@@ -79,12 +79,24 @@ class EnlargedConfig:
     selection: str = "circle"               # "circle" (default) | "v6" (longest duration, as the tile pipeline)
     jump_factor: float = 3.0                # jump: step > jump_factor x median step and > jump_min_km
     jump_min_km: float = 30.0
+    tracker: str = "v6"                     # key of TRACKERS: "v6" (V6 overlap tracking) | "gated" | registered
+    jump_rule: str = "none"                 # "none" (flag jumps only) | "split" (longest jump-free segment)
+    max_link_speed_ms: float = 40.0         # "gated": reject links implying a centroid speed above this
+    mass_ratio: float = 2.0                 # "gated": reject links where the rain volume changes by > this factor
+    mass_step_factor: float = 2.0           # ... and the centroid moves > this x the track's median step
     neighbourhood_cells: int = 15           # dilation of the footprint for the storm's valid-data fraction
     footprint_res_deg: float = 0.25         # coarse grid of the footprints used for duplicate detection
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def variant(cls, name: str, **kw) -> "EnlargedConfig":
+        """Jump-handling variants: v0 = V6 linking, jumps flagged; v1 = V6 linking, analyse the longest jump-free
+        segment; v2 = gated linking (speed gate + mass continuity)."""
+        base = {"v0": {}, "v1": {"jump_rule": "split"}, "v2": {"tracker": "gated"}}[name]
+        return cls(**{**base, **kw})
 
 
 # ------------------------------------------------------------------------------------------------ inputs
@@ -231,15 +243,139 @@ def pixel_area_km2(lat, lon) -> np.ndarray:
     return np.cos(np.radians(lat))[:, None] * 111 * 111 * dlat * dlon * np.ones((1, len(lon)))
 
 
-def track_field(rain0: np.ndarray, cfg: EnlargedConfig) -> np.ndarray:
-    """V6 identification + overlap tracking of a (nt, ny, nx) field (no NaN); returns int track ids (0 = none)."""
+def _track_v6(rain0, lat, lon, cfg: EnlargedConfig) -> np.ndarray:
+    """V6 identification + overlap tracking (identical output to the V6 pipeline)."""
     ident = storm_area_identification(rain0, cfg.morph_radius_cells, cfg.rainfall_threshold_mmhr)
     return np.asarray(overlap_track(ident, ratio_threshold=cfg.overlap_ratio_threshold,
                                     dry_spell_time=cfg.dry_spell_hr), dtype=np.int64)
 
 
+def _object_stats(lab, rain, lat, lon, n):
+    """Rain volume (sum of rain, cell units) and rain-weighted centroid (lon, lat) of labels 0..n-1."""
+    w = rain.ravel()
+    lf = lab.ravel()
+    v = np.bincount(lf, weights=w, minlength=n)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        x = np.bincount(lf, weights=w * np.broadcast_to(lon[None, :], lab.shape).ravel(), minlength=n) / v
+        y = np.bincount(lf, weights=w * np.broadcast_to(lat[:, None], lab.shape).ravel(), minlength=n) / v
+    return v, x, y
+
+
+def _km(x0, y0, x1, y1):
+    """Equirectangular distance (km), adequate for hourly steps."""
+    return np.hypot((x1 - x0) * 111.32 * np.cos(np.radians(0.5 * (y0 + y1))), (y1 - y0) * 111.32)
+
+
+def track_gated(rain0, lat, lon, cfg: EnlargedConfig) -> np.ndarray:
+    """V6 identification and overlap linking (as ``tracking.track_fast``) with two extra conditions on every link
+    of a current object to a previous storm (the best-overlap candidate that passes is used; none -> new storm):
+      speed gate      centroid distance / elapsed time <= ``max_link_speed_ms``
+      mass continuity not (rain volume ratio > ``mass_ratio`` and centroid step > ``mass_step_factor`` x the
+                      storm's median previous step [at least ``jump_min_km``]; needs >= 2 previous steps)
+    Merges that move the centroid abruptly therefore start a new storm instead of continuing an identity."""
+    from skimage.segmentation import relabel_sequential
+    grown = storm_area_identification(rain0, cfg.morph_radius_cells, cfg.rainfall_threshold_mmhr)
+    g_int = np.asarray(grown).astype(np.int64)
+    result = g_int.copy()
+    nt = g_int.shape[0]
+    hist: dict = {}                                   # label -> list of (t, lon, lat)
+    n0 = int(result[0].max()) + 1
+    _, x0, y0 = _object_stats(result[0], rain0[0], lat, lon, n0)
+    for k in np.unique(result[0]):
+        if k:
+            hist[int(k)] = [(0, x0[k], y0[k])]
+    dry = cfg.dry_spell_hr
+    for t in range(1, nt):
+        g = g_int[t]
+        cur = np.unique(g)
+        cur = cur[cur != 0]
+        max_label = int(result[1].max()) if t == 1 else int(result[:t].max())
+        if cur.size == 0:
+            continue
+        gf = g.ravel()
+        ng = int(gf.max()) + 1
+        curr_size = np.bincount(gf, minlength=ng)
+        cv, cx, cy = _object_stats(g, rain0[t], lat, lon, ng)
+        mapping, unmatched = {}, set(int(c) for c in cur)
+        steps = range(1, dry + 2) if t >= dry + 1 else range(1, 2)
+        for back in steps:
+            if not unmatched:
+                break
+            prev = result[t - back]
+            pf = prev.ravel()
+            K = int(pf.max()) + 1
+            prev_size = np.bincount(pf, minlength=K)
+            pv, px, py = _object_stats(prev, rain0[t - back], lat, lon, K)
+            m = (gf > 0) & (pf > 0)
+            if not m.any():
+                continue
+            code, cnt = np.unique(gf[m] * K + pf[m], return_counts=True)
+            cc, pp = code // K, code % K
+            ratio = cnt / curr_size[cc] + cnt / prev_size[pp]
+            order = np.lexsort((pp, -ratio, cc))
+            for c, p, r in zip(cc[order], pp[order], ratio[order]):
+                c, p = int(c), int(p)
+                if c not in unmatched or r <= cfg.overlap_ratio_threshold:
+                    continue
+                d = float(_km(px[p], py[p], cx[c], cy[c]))
+                if d / (back * 3.6) > cfg.max_link_speed_ms:
+                    continue
+                h = hist.get(p, [])
+                if len(h) >= 3:
+                    hs = np.array(h)
+                    med = float(np.median(_km(hs[:-1, 1], hs[:-1, 2], hs[1:, 1], hs[1:, 2])))
+                    vr = cv[c] / pv[p] if pv[p] > 0 else np.inf
+                    if max(vr, 1 / vr if vr > 0 else np.inf) > cfg.mass_ratio and \
+                            d > max(cfg.mass_step_factor * med, cfg.jump_min_km):
+                        continue
+                mapping[c] = p
+                unmatched.discard(c)
+        for c in cur:
+            c = int(c)
+            if c not in mapping:
+                max_label += 1
+                mapping[c] = max_label
+        lut = np.zeros(ng, dtype=np.int64)
+        for c, v in mapping.items():
+            lut[c] = v
+        result[t] = lut[g]
+        nr = int(result[t].max()) + 1
+        _, rx, ry = _object_stats(result[t], rain0[t], lat, lon, nr)
+        for k in np.unique(result[t]):
+            if k:
+                hist.setdefault(int(k), []).append((t, rx[k], ry[k]))
+    return np.asarray(relabel_sequential(result)[0], dtype=np.int64)
+
+
+TRACKERS = {"v6": _track_v6, "gated": track_gated}
+
+
+def register_tracker(name: str, fn) -> None:
+    """Plug in another tracker: ``fn(rain0, lat, lon, cfg) -> (nt, ny, nx) int track ids`` (0 = none)."""
+    TRACKERS[name] = fn
+
+
+def track_field(rain0: np.ndarray, cfg: EnlargedConfig, lat=None, lon=None) -> np.ndarray:
+    """Track a (nt, ny, nx) field (no NaN) with the configured tracker; returns int track ids (0 = none)."""
+    return TRACKERS[cfg.tracker](rain0, lat, lon, cfg)
+
+
+def jump_segments(lon, lat, cfg: EnlargedConfig) -> list:
+    """Split consecutive positions at jumps (step > jump_factor x median step and > jump_min_km); returns
+    (start, end) index pairs, end exclusive."""
+    lon, lat = np.asarray(lon, float), np.asarray(lat, float)
+    if lon.size < 3:
+        return [(0, lon.size)]
+    _, _, st = _GEOD.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    st = np.asarray(st) / 1000.0
+    med = float(np.median(st))
+    j = np.flatnonzero((st > cfg.jump_factor * med) & (st > cfg.jump_min_km))
+    cuts = np.r_[0, j + 1, lon.size]
+    return [(int(a), int(b)) for a, b in zip(cuts[:-1], cuts[1:])]
+
+
 def track_table(labels: np.ndarray, rain0: np.ndarray, area: np.ndarray,
-                weight: Optional[np.ndarray] = None) -> pd.DataFrame:
+                weight: Optional[np.ndarray] = None, lat=None, lon=None) -> pd.DataFrame:
     """Per (track, hour): pixel count, area (km^2), rain volume (mm km^2) and, with ``weight`` (ny, nx), the
     weighted volume (e.g. inside the screening circle)."""
     rows = []
@@ -255,8 +391,12 @@ def track_table(labels: np.ndarray, rain0: np.ndarray, area: np.ndarray,
         wv = np.bincount(lab, weights=vol * weight.ravel(), minlength=n) if weight is not None else np.zeros(n)
         ids = np.flatnonzero(cnt)
         ids = ids[ids > 0]
-        rows.append(pd.DataFrame({"track_id": ids, "t": t, "pixels": cnt[ids], "area_km2": a[ids],
-                                  "volume": v[ids], "circle_volume": wv[ids]}))
+        d = {"track_id": ids, "t": t, "pixels": cnt[ids], "area_km2": a[ids], "volume": v[ids],
+             "circle_volume": wv[ids]}
+        if lat is not None:
+            _, x, y = _object_stats(labels[t], rain0[t], lat, lon, n)
+            d.update(lon=x[ids], lat=y[ids])
+        rows.append(pd.DataFrame(d))
     if not rows:
         return pd.DataFrame(columns=["track_id", "t", "pixels", "area_km2", "volume", "circle_volume"])
     return pd.concat(rows, ignore_index=True)
@@ -364,7 +504,7 @@ def v6_on_field(fld: Field, seed_key: str, cfg: EnlargedConfig, labels=None) -> 
     trimmed by the domain area, V6 window and descriptors. Returns (descriptors or None, labels, k, trimmed hours)."""
     rain0 = np.nan_to_num(fld.rain, nan=0.0)
     if labels is None:
-        labels = track_field(rain0, cfg)
+        labels = _track_v6(rain0, fld.lat, fld.lon, cfg)       # the tile baseline is always the V6 pipeline
     area = pixel_area_km2(fld.lat, fld.lon)
     tab = track_table(labels, rain0, area)
     pick = select_longest_storm(tab, labels.shape[1] * labels.shape[2] * cfg.min_area_fraction)
@@ -391,7 +531,8 @@ def _footprint_cells(mask: np.ndarray, lat, lon, res: float) -> np.ndarray:
 
 
 def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str = "", with_tile: bool = True,
-                  return_footprints: bool = True) -> tuple:
+                  return_footprints: bool = True, labels: Optional[np.ndarray] = None,
+                  tile_result: Optional[tuple] = None, keep_private: bool = False) -> tuple:
     """Enlarged-window analysis of one catalog event on ``fld`` (the tile plus margin, containing the tile).
 
     Returns (row dict, footprints DataFrame [time, cells] of the storm's trimmed hours, or None). The row holds the
@@ -425,8 +566,10 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
     area = pixel_area_km2(fld.lat, fld.lon)
     tile_area = float(area[inside].sum())
 
-    labels = track_field(rain0, cfg)
-    tab = track_table(labels, rain0, area, circ)
+    if labels is None:                     # labels of the same field and tracker may be passed in (variant reuse)
+        labels = track_field(rain0, cfg, fld.lat, fld.lon)
+    row["tracker"], row["jump_rule"] = cfg.tracker, cfg.jump_rule
+    tab = track_table(labels, rain0, area, circ, fld.lat, fld.lon)
     circle_total = float(sum((rain0[t] * area * circ).sum() for t in range(rain0.shape[0])))
     row["circle_volume_total"] = circle_total
     if cfg.selection == "circle":
@@ -445,6 +588,19 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
         hours, n_big = trim_hours(tk, hours, cfg.min_area_fraction * tile_area)
         row["track_hours"] = int(len(hours))
         row["hours_above_area"] = n_big
+        if len(hours) >= 2:
+            pk = tk.set_index("t").loc[hours]
+            segs = jump_segments(pk["lon"].values, pk["lat"].values, cfg)
+            row["track_n_jumps"] = len(segs) - 1
+            if cfg.jump_rule == "split" and len(segs) > 1:
+                vol = pk["volume"].values
+                a, b = max(segs, key=lambda ab: (ab[1] - ab[0], vol[ab[0]:ab[1]].sum()))
+                hours = hours[a:b]
+                row["track_hours_split"] = int(len(hours))
+                if len(hours) < cfg.min_positions:
+                    n_big = 0                                      # drop: no jump-free segment of >= 5 hours
+            elif cfg.jump_rule not in ("none", "split"):
+                raise ValueError(cfg.jump_rule)
         if n_big >= cfg.min_duration_hr and len(hours):
             d = v6_descriptors(rain0, labels, k, hours, fld.lat, fld.lon, fld.times, seed_key, cfg)
             if d is not None:
@@ -461,17 +617,25 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
                     fps.insert(0, "storm_event", ev.name)
                     fps.insert(0, "tile", tile)
                 big_k, big_hours = k, wh
-    if with_tile:
-        sub = fld.crop(*ev.tile_bounds)
-        if sub.rain.shape[1:] != (len(ev.lat), len(ev.lon)):
-            raise ValueError("tile crop does not match the tile grid")
-        dt, lab_t, kt, ht = v6_on_field(sub, seed_key, cfg)
+    if with_tile or tile_result is not None:
+        if tile_result is None:
+            sub = fld.crop(*ev.tile_bounds)
+            if sub.rain.shape[1:] != (len(ev.lat), len(ev.lon)):
+                raise ValueError("tile crop does not match the tile grid")
+            dt, lab_t, kt, ht = v6_on_field(sub, seed_key, cfg)
+            twh = dt.pop("_win_hours") if dt is not None else None
+            tile_result = (dt, lab_t, kt, twh, sub)
+        dt, lab_t, kt, twh, sub = tile_result
+        row["_tile"] = tile_result
         row["tile_retained"] = dt is not None
         if dt is not None:
-            twh = dt.pop("_win_hours")
             row.update({f"tile_{c}": v for c, v in dt.items()})
             if row["retained"]:
                 row.update(_compare_tile(row, labels, big_k, big_hours, lab_t, kt, twh, rain0, r0, c0, sub, area))
+    if keep_private:                       # track ids and tile result, for reuse by analyze_catalog_file_variants
+        row["_labels"] = labels
+    else:
+        row.pop("_tile", None)
     return row, fps
 
 
@@ -592,7 +756,28 @@ def analyze_catalog_file(path, aorc_dir, cfg: EnlargedConfig, tile: str = "", wi
     """Read one storm file, the AORC field on tile + margin, and analyse it (``analyze_event``)."""
     ev = read_catalog_event(path)
     fld = read_aorc_field(aorc_dir, ev.times, *tile_bounds_with_margin(ev, cfg.margin_deg))
-    return analyze_event(ev, fld, cfg, tile=tile, with_tile=with_tile)
+    row, fps = analyze_event(ev, fld, cfg, tile=tile, with_tile=with_tile)
+    return row, fps
+
+
+def analyze_catalog_file_variants(path, aorc_dir, cfgs: dict, tile: str = "") -> dict:
+    """Several configurations (same margin) of one event from a single AORC read; the tracking is reused between
+    configurations with the same tracker, and the tile-only V6 columns are computed once (first configuration).
+    Returns {name: (row, footprints)}."""
+    ev = read_catalog_event(path)
+    margins = {c.margin_deg for c in cfgs.values()}
+    if len(margins) != 1:
+        raise ValueError("variants must share the margin")
+    fld = read_aorc_field(aorc_dir, ev.times, *tile_bounds_with_margin(ev, margins.pop()))
+    out, cache, tres = {}, {}, None
+    for name, cfg in cfgs.items():
+        row, fps = analyze_event(ev, fld, cfg, tile=tile, labels=cache.get(cfg.tracker), tile_result=tres,
+                                 keep_private=True)
+        cache[cfg.tracker] = row.pop("_labels")
+        tres = row.pop("_tile", None)      # the tile-only V6 result is computed once and shared
+        row["variant"] = name
+        out[name] = (row, fps)
+    return out
 
 
 def _job(args):
