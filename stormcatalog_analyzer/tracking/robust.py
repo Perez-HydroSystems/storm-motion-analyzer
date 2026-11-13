@@ -22,7 +22,7 @@ split            "v6" (every child inherits the id) | "largest" (only the child 
                  advected footprint rain keeps the id; the others start new storms or take another parent).
 merge            "v6" (best overlap score) | "volume" (parent contributing the largest rain volume to the child) |
                  "partition" (if several parents each have >= ``partition_min_share`` of their advected footprint
-                 inside the child, the child is divided among them by a watershed of the rain field seeded with the
+                 inside the child and >= ``partition_min_frac`` of the largest such parent's rain volume, the child is divided among them by a watershed of the rain field seeded with the
                  advected parent footprints; every parent keeps its own part, so the track follows the parent's
                  rain mass instead of the composite object; otherwise as "volume").
 assignment       "greedy" (per child, as V6, then the split/merge rules) | "hungarian" (one-to-one optimal
@@ -63,13 +63,14 @@ class LinkingConfig:
     split: str = "v6"                     # v6 | largest
     merge: str = "v6"                     # v6 | volume | partition
     partition_min_share: float = 0.3
+    partition_min_frac: float = 0.25      # claimants need >= this fraction of the largest claimant's rain volume
     assignment: str = "greedy"            # greedy | hungarian
     w_dist: float = 1.0
     w_vol: float = 0.5
     dist_ref_km: float = 100.0
     fix_labels: bool = False
-    pattern_min_pixels: int = 30
-    pattern_min_corr: float = 0.3
+    pattern_min_pixels: int = 100
+    pattern_min_corr: float = 0.5
     pattern_vmax_ms: float = 40.0
 
     def is_v6(self) -> bool:
@@ -100,10 +101,12 @@ PRESETS = {
     "merge_volume": {"fix_labels": True, "split": "largest", "merge": "volume"},
     "partition": {"fix_labels": True, "split": "largest", "merge": "partition"},
     "partition_pattern": {"fix_labels": True, "split": "largest", "merge": "partition", "predict": "pattern"},
+    "merge_volume_keepsplit": {"fix_labels": True, "merge": "volume"},
+    "partition_keepsplit": {"fix_labels": True, "merge": "partition"},
+    "partition_keepsplit_pattern": {"fix_labels": True, "merge": "partition", "predict": "pattern"},
     "hungarian_pattern": {"fix_labels": True, "assignment": "hungarian", "predict": "pattern", "max_speed_ms": 40.0},
     "gated_pattern": {"fix_labels": True, "predict": "pattern", "max_speed_ms": 40.0, "mass_ratio": 2.0},
-    "robust": {"fix_labels": True, "predict": "pattern", "split": "largest", "merge": "partition",
-               "max_speed_ms": 40.0, "mass_ratio": 2.0},
+    "robust": {"fix_labels": True, "merge": "partition", "max_speed_ms": 40.0, "mass_ratio": 2.0},
 }
 
 
@@ -154,10 +157,13 @@ def _stats(lab_flat, rain_flat, rows_flat, cols_flat, n):
     return cnt, v, r, c
 
 
-def pattern_shift(r0, r1, mask0, max_disp: int, min_corr: float = 0.3):
+def pattern_shift(r0, r1, mask0, max_disp: int, min_corr: float = 0.3, mask1=None, dilate: int = 3):
     """Displacement (drow, dcol) in cells of the rain pattern inside ``mask0`` from ``r0`` to ``r1`` (masked
-    normalized cross-correlation of log(1 + rain), search radius ``max_disp`` cells, parabolic sub-cell peak).
-    Returns (drow, dcol, corr); NaN shift if the peak correlation is below ``min_corr``."""
+    normalized cross-correlation of log(1 + rain), search radius ``max_disp`` cells, parabolic sub-cell peak), as in
+    the storm-masked area correlation of the rain-pattern analysis. ``mask1`` restricts the hour-t+1 field (e.g. to
+    the identified rain objects); both masks are dilated by ``dilate`` cells. Without ``mask1`` the whole search
+    area is used (prone to spurious peaks for small footprints). Returns (drow, dcol, corr); NaN shift if the peak
+    correlation is below ``min_corr``."""
     from skimage.registration._masked_phase_cross_correlation import cross_correlate_masked
     rr, cc = np.nonzero(mask0)
     if rr.size == 0:
@@ -165,8 +171,18 @@ def pattern_shift(r0, r1, mask0, max_disp: int, min_corr: float = 0.3):
     a, b = max(rr.min() - max_disp, 0), min(rr.max() + max_disp + 1, r0.shape[0])
     c, d = max(cc.min() - max_disp, 0), min(cc.max() + max_disp + 1, r0.shape[1])
     R0, R1 = np.log1p(r0[a:b, c:d]), np.log1p(r1[a:b, c:d])
+    st = ndimage.generate_binary_structure(2, 2)
     M0 = mask0[a:b, c:d]
-    M1 = np.ones_like(M0)
+    if dilate:
+        M0 = ndimage.binary_dilation(M0, st, iterations=dilate)
+    if mask1 is None:
+        M1 = np.ones_like(M0)
+    else:
+        M1 = mask1[a:b, c:d]
+        if dilate:
+            M1 = ndimage.binary_dilation(M1, st, iterations=dilate)
+        if not M1.any():
+            return np.nan, np.nan, np.nan
     xc = cross_correlate_masked(R1, R0, M1, M0, mode="full", axes=(0, 1), overlap_ratio=0.3)
     xc = np.where(np.isfinite(xc), xc, -np.inf)
     off = np.array(R0.shape) - 1
@@ -302,7 +318,7 @@ def track_robust(ident: np.ndarray, rain: Optional[np.ndarray] = None, lat=None,
                     if cfg.predict == "pattern" and rr.size >= cfg.pattern_min_pixels:
                         mask0 = prev == p
                         dr, dc, _ = pattern_shift(rain[t - back], rain[t], mask0, max_disp * back,
-                                                  cfg.pattern_min_corr)
+                                                  cfg.pattern_min_corr, mask1=g > 0)
                         info["pattern_steps"] += 1
                         if not np.isfinite(dr):
                             info["pattern_fallbacks"] += 1
@@ -395,6 +411,9 @@ def track_robust(ident: np.ndarray, rain: Optional[np.ndarray] = None, lat=None,
                         best = max(rs, key=lambda r: (r[4], r[2], -r[1]))
                     if cfg.merge == "partition" and len(rs) > 1:
                         claim = [r for r in rs if r[3] / max(S_p[r[1]], 1) >= cfg.partition_min_share]
+                        if claim:
+                            vmax = max(V_p[r[1]] for r in claim)
+                            claim = [r for r in claim if V_p[r[1]] >= cfg.partition_min_frac * vmax]
                         if len(claim) > 1:
                             partition[c] = {r[1]: (pred_idx.get(r[1]), r[1]) for r in claim}
                     mapping[c] = int(best[1])

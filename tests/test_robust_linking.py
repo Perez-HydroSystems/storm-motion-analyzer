@@ -58,12 +58,12 @@ def test_presets_valid_and_v6_flag():
 
 # --------------------------------------------------------------------------------------- merge
 def merge_case(nt=8):
-    """Target (large, moving east 3 cells/h) and a smaller distractor coming from the south-east that merges
-    into it from t = 4 on (the objects then touch and form one object)."""
+    """Target (moving east 3 cells/h) and a somewhat smaller distractor (> 25% of the target's rain) coming from
+    the north that merges into it from t = 3 on (the objects then touch and form one object)."""
     rain = np.zeros((nt, 80, 80))
     for t in range(nt):
         rain[t] += blob((80, 80), 40, 15 + 3 * t, 9, 12.0)
-        rain[t] += blob((80, 80), 40 + max(28 - 6 * t, 9), 40 + max(0, 12 - 3 * t), 6, 6.0)
+        rain[t] += blob((80, 80), 40 + max(28 - 6 * t, 12), 40 + max(0, 12 - 3 * t), 8, 9.0)
     return rain
 
 
@@ -161,10 +161,10 @@ def test_pattern_shift_recovers_displacement():
 
 
 def test_prediction_links_fast_small_storm():
-    """A storm moving 12 cells/h (diameter 10) never overlaps itself: V6 starts a new id every hour, advection links it."""
+    """A storm (diameter 14, 16 cells/h) never overlaps itself: V6 starts a new id every hour, advection links it."""
     rain = np.zeros((5, 80, 80))
     for t in range(5):
-        rain[t] = blob((80, 80), 40, 8 + 12 * t, 5, 10.0)
+        rain[t] = blob((80, 80), 40, 8 + 16 * t, 7, 10.0)
     ident = storm_area_identification(rain, 2, 0.5)
     assert len(np.unique(track_robust(ident, rain, LAT, LON)[ident > 0])) == 5
     # the pattern velocity is measured from the rain field itself, so it links from the first hour on
