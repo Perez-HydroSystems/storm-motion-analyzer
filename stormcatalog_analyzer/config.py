@@ -43,6 +43,10 @@ class TrackingConfig:
     ellipse_fit_method: str = "moments"      # "moments" | "contour"
     overlap_ratio_threshold: float = 0.2     # storm-overlap ratio to link across time (fraction)
     dry_spell_hr: int = 0                     # allowed gap when matching storms (hours)
+    # robust linking (tracking.robust); None = V6 linking (tracking.track). A preset name of
+    # tracking.robust.PRESETS (e.g. "partition_pattern") or a dict of LinkingConfig fields.
+    linking: Optional[object] = None
+    core_threshold_mmhr: Optional[float] = None  # identify cores at this rate, grown into the threshold footprint
 
 
 @dataclass
@@ -183,6 +187,19 @@ class Config:
             errors.append("direction_grid.min_segment_length_m must be >= 0")
         if self.tracking.dry_spell_hr < 0:
             errors.append("tracking.dry_spell_hr must be >= 0")
+        if self.tracking.linking is not None:
+            from .tracking.robust import PRESETS, LinkingConfig
+            lk = self.tracking.linking
+            if isinstance(lk, str) and lk not in PRESETS:
+                errors.append(f"tracking.linking: unknown preset {lk!r} (known: {sorted(PRESETS)})")
+            elif isinstance(lk, dict):
+                try:
+                    LinkingConfig(**lk)
+                except TypeError as e:
+                    errors.append(f"tracking.linking: {e}")
+        if self.tracking.core_threshold_mmhr is not None and \
+                self.tracking.core_threshold_mmhr <= self.tracking.rainfall_threshold_mmhr:
+            errors.append("tracking.core_threshold_mmhr must be > tracking.rainfall_threshold_mmhr")
         if self.direction_grid.n_sectors < 2:
             errors.append("direction_grid.n_sectors must be >= 2")
         if self.direction_grid.cell_size_km <= 0:

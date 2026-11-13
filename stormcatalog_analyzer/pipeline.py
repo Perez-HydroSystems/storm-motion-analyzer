@@ -86,6 +86,7 @@ def run_catalog_tracking(cfg: Config, verbose: bool = True) -> Dict[str, dict]:
                 var_name=t.rainfall_var_name,
                 ratio_threshold=t.overlap_ratio_threshold,
                 dry_spell_time=t.dry_spell_hr,
+                linking=t.linking, core_threshold=t.core_threshold_mmhr,
                 area_fraction=cfg.selection.min_area_fraction,
             )
             if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
@@ -455,6 +456,7 @@ def track_one_event(cfg: Config, storm: str):
             ds, event_dict,
             morph_radius=t.morph_radius_cells, high_threshold=t.rainfall_threshold_mmhr, var_name=t.rainfall_var_name,
             ratio_threshold=t.overlap_ratio_threshold, dry_spell_time=t.dry_spell_hr,
+            linking=t.linking, core_threshold=t.core_threshold_mmhr,
             area_fraction=cfg.selection.min_area_fraction,
         )
         if int(event_dict["longest_duration"]) < cfg.selection.min_duration_hr:
