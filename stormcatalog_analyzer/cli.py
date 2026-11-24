@@ -62,7 +62,9 @@ def cmd_enlarged(args) -> int:
 
     from .enlarged import EnlargedConfig, run_catalog
 
-    cfg = EnlargedConfig(margin_deg=args.margin, selection=args.selection)
+    cfg = EnlargedConfig(margin_deg=args.margin, selection=args.selection,
+                         tracker=f"robust:{args.linking}" if args.linking else "v6",
+                         linger_class=args.classes, pattern=args.pattern)
     rows, fps = run_catalog(args.catalog_dir, args.aorc_dir, cfg, tile=args.tile, workers=args.workers,
                             with_tile=not args.no_tile)
     out = Path(args.out)
@@ -126,6 +128,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--selection", default="circle", choices=("circle", "v6"))
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--no-tile", action="store_true", help="Skip the tile-only V6 comparison.")
+    p.add_argument("--linking", help="Preset of tracking.robust for the linking, e.g. partition_keepsplit "
+                                     "(default: the standard linking).")
+    p.add_argument("--classes", action="store_true",
+                   help="Add the class of each storm: coherent, stall, turn or meander.")
+    p.add_argument("--pattern", action="store_true",
+                   help="Add the rain-pattern and propagation velocities of each storm.")
     p.add_argument("--out", required=True, help="Output parquet (footprints next to it).")
     p.add_argument("--quiet", action="store_true")
     p.set_defaults(func=cmd_enlarged)

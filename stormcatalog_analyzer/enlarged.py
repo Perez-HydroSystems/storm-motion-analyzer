@@ -29,6 +29,17 @@ storm's neighbourhood, hours in which the footprint touches the field border or 
 storm, and the comparison with the V6 result on the tile alone (same field, V6 rule): distance between the tracks
 and the share of the tile storm's rain covered by the enlarged footprint.
 
+Optional outputs (off by default, so the default table is unchanged):
+    ``linger_class``  how the storm moved: "coherent", or for a non-coherent storm "stall", "turn" or "meander"
+                      (``motion.linger``), with the quantities of the rules
+    ``pattern``       the rain-pattern velocity over the analysed window (storm-masked area correlation with quality
+                      control, ``motion.pattern``) and the propagation velocity: the net velocity of the rain-mass
+                      centroid (rain-weighted mean position of the footprint) minus the pattern velocity
+
+Trackers: ``tracker`` is "v6", "gated", a name added with ``register_tracker``, or "robust:<preset>" for a preset of
+``tracking.robust`` (for example "robust:partition_keepsplit"), which needs no registration and also works in worker
+processes.
+
 Cross-tile duplicates (``assign_system_ids``): the same system appears in the catalogs of several tiles. Two events
 of different tiles are the same system when their storm tracks share >= 50% of the hours of the shorter one and,
 over the shared hours, their footprints (coarse cells, ``footprint_res_deg``) overlap by >= 50% of the smaller one;
@@ -79,13 +90,16 @@ class EnlargedConfig:
     selection: str = "circle"               # "circle" (default) | "v6" (longest duration, as the tile pipeline)
     jump_factor: float = 3.0                # jump: step > jump_factor x median step and > jump_min_km
     jump_min_km: float = 30.0
-    tracker: str = "v6"                     # key of TRACKERS: "v6" (V6 overlap tracking) | "gated" | registered
+    tracker: str = "v6"                     # "v6" (V6 overlap tracking) | "gated" | registered | "robust:<preset>"
     jump_rule: str = "none"                 # "none" (flag jumps only) | "split" (longest jump-free segment)
     max_link_speed_ms: float = 40.0         # "gated": reject links implying a centroid speed above this
     mass_ratio: float = 2.0                 # "gated": reject links where the rain volume changes by > this factor
     mass_step_factor: float = 2.0           # ... and the centroid moves > this x the track's median step
     neighbourhood_cells: int = 15           # dilation of the footprint for the storm's valid-data fraction
     footprint_res_deg: float = 0.25         # coarse grid of the footprints used for duplicate detection
+    linger_class: bool = False              # add the travel / stall / turn / meander class (motion.linger)
+    pattern: bool = False                   # add the rain-pattern and propagation velocities (motion.pattern)
+    pattern_cross_check: bool = True        # ... with the two optical-flow cross-checks (pattern_robust)
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
 
     def to_dict(self) -> dict:
@@ -357,6 +371,9 @@ def register_tracker(name: str, fn) -> None:
 
 def track_field(rain0: np.ndarray, cfg: EnlargedConfig, lat=None, lon=None) -> np.ndarray:
     """Track a (nt, ny, nx) field (no NaN) with the configured tracker; returns int track ids (0 = none)."""
+    if cfg.tracker not in TRACKERS and cfg.tracker.startswith("robust:"):
+        from .tracking import robust                            # a preset of tracking.robust, built on first use
+        TRACKERS[cfg.tracker] = robust.enlarged_tracker(cfg.tracker.split(":", 1)[1])
     return TRACKERS[cfg.tracker](rain0, lat, lon, cfg)
 
 
@@ -622,6 +639,12 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
                 row.update({f"big_{c}": v for c, v in d.items()})
                 row.update(_flags(rain0, valid, labels, k, wh, inside, area, cfg))
                 row["volume_track_mm_km2"] = float(tk[tk["t"].isin(hours)]["volume"].sum())
+                if cfg.linger_class:
+                    from .motion.linger import classify_track
+                    row.update(classify_track(d["track_lon"], d["track_lat"], d["storm_area_km2"], d["coherent"],
+                                              d["net_length_km"], d["net_speed_ms"]))
+                if cfg.pattern:
+                    row.update(_pattern(rain0, labels, k, wh, tk, fld, pattern_seed_for(tile, ev.name), cfg))
                 if return_footprints:
                     fps = pd.DataFrame({"time": [pd.Timestamp(fld.times[t]) for t in hours],
                                         "cells": [_footprint_cells(labels[t] == k, fld.lat, fld.lon,
@@ -650,6 +673,19 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
     else:
         row.pop("_tile", None)
     return row, fps
+
+
+def _pattern(rain0, labels, k, wh, tk, fld: Field, seed, cfg: EnlargedConfig) -> dict:
+    """Rain-pattern and propagation velocities of track ``k`` over the analysed hours ``wh`` (motion.pattern). The
+    rain-mass centroid of the propagation is the rain-weighted mean position of the footprint (track table)."""
+    from .motion.pattern import storm_pattern
+    hours = np.asarray(wh, int)
+    pk = tk.set_index("t").loc[hours]
+    out, steps = storm_pattern(rain0, fld.lon, fld.lat, [labels[t] == k for t in hours], hours,
+                               pk["lon"].values, pk["lat"].values, seed=seed, cross_check=cfg.pattern_cross_check)
+    out.update(pattern_step_u=steps["u"].tolist(), pattern_step_v=steps["v"].tolist(),
+               pattern_step_corr=steps["corr"].tolist(), pattern_step_accepted=steps["accepted"].tolist())
+    return out
 
 
 def _flags(rain0, valid, labels, k, wh, inside, area, cfg) -> dict:
@@ -821,3 +857,8 @@ def run_catalog(catalog_dir, aorc_dir, cfg: EnlargedConfig, tile: str, workers: 
 def seed_for(tile: str, event: str, base: int = CoherenceConfig().seed) -> list:
     """Coherence-test seed used for ``"<tile>/<event>"`` (as the V6 pipeline)."""
     return [base, zlib.crc32(f"{tile}/{event}".encode())]
+
+
+def pattern_seed_for(tile: str, event: str, base: int = CoherenceConfig().seed) -> list:
+    """Seed of the coherence test of the rain-pattern steps of ``"<tile>/<event>"`` (its own random stream)."""
+    return [base, zlib.crc32(f"{tile}/{event}".encode()), 1]
