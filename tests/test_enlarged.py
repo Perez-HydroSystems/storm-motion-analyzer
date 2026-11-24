@@ -1,4 +1,5 @@
 """Enlarged-window tracking (stormcatalog_analyzer.enlarged) and the vectorised overlap tracker."""
+import os
 from pathlib import Path
 
 import numpy as np
@@ -37,8 +38,8 @@ def test_track_fast_identical_on_catalog():
 
 
 # ------------------------------------------------------------------ catalog event: circle placement
-B7_REPRO = Path("/Users/gjperezm/Databases/RainyDay_Storm_Catalogs_CONUS/Run_CONUS/Results_repro_2002_2022/B7/"
-                "StormCatalog")
+# optional: StormCatalog folder of a full RainyDay tile (set SMA_B7_REPRO_CATALOG); the test is skipped without it
+B7_REPRO = Path(os.environ.get("SMA_B7_REPRO_CATALOG", "__not_available__"))
 
 
 def _check_circle(files, max_cells, rel):
