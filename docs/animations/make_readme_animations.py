@@ -9,7 +9,7 @@ two_motions.gif            one storm with its two motions: the rain mass and the
 The storms are extreme precipitation events of the storm-motion study of the contiguous United States (AORC hourly
 precipitation), tracked on the tile enlarged by 5 degrees with the linking preset ``partition_keepsplit``:
     B7_139   6 September 2020   travel        D7_001   29 August 2017   stall
-    D6_101   13 July 2025        turn          B6_028   14 June 2014     meander
+    D6_101   13 July 2025        turn          C9_264   20 July 2023     meander
     C8_140   7 June 2008         two motions
 The rain-pattern velocities of the second animation are computed here with ``motion.pattern.storm_pattern``.
 """
@@ -36,7 +36,7 @@ def main():
     storms = [load("B7_139", "Travel", "keeps one direction of motion"),
               load("D7_001", "Stall", "stays over the same area"),
               load("D6_101", "Turn", "changes its heading"),
-              load("B6_028", "Meander", "moves without a steady direction")]
+              load("C9_264", "Meander", "moves without a steady direction")]
     print(animate_storm_motion(
         storms, HERE / "storm_motion_classes.gif", title="Storm motion: travel, stall, turn, and meander",
         subtitle="Hourly rainfall and the track of the rain mass of four storms, 12 hours each. "
