@@ -7,8 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-23
+
 ### Added
 
+- **Enlarged-window tracking of RainyDay events** (`stormcatalog_analyzer/enlarged.py`, CLI
+  `stormcatalog-analyzer enlarged` and `systems`). RainyDay screens events tile by tile, and tracking inside the
+  tile clips storms at its edge. `run_catalog` tracks each event on the tile enlarged by a margin (default 5°),
+  reading the hourly rain field directly (AORC), and selects the storm of the event by the screening circle. Each
+  event records the share of rain outside the tile, the valid-data fraction, edge contacts, jumps of the centroid,
+  and the comparison with the tile-only result. `assign_system_ids` groups the events of different tiles that
+  belong to the same storm system. `tracking.tracking.track_fast` is a vectorised tracker with the same output as
+  `track`, approximately 20 times faster.
+- **Jump handling** (`EnlargedConfig.variant`): `v0` flags the jumps of the centroid, `v1` analyses the longest
+  jump-free segment, and `v2` uses gated linking (speed gate and mass continuity). Other trackers can be plugged in
+  with `enlarged.register_tracker`.
+- **Robust linking options** (`stormcatalog_analyzer/tracking/robust.py`, all off by default). `track_robust`
+  reproduces the standard linking with its default settings and adds: advection of the parent footprint before the
+  overlap is measured, a distance gate, a mass-continuity rule, a split rule, merge rules (largest volume, or a
+  partition of the merged object among its parents), one-to-one assignment, a fix of the labels at the second hour,
+  and identification by cores. `PRESETS` names the combinations; `partition_keepsplit` is the one used in the
+  storm-motion paper. `robust.enlarged_tracker` returns a tracker for `enlarged.register_tracker`.
 - **Test suite** (`pytest`, `pip install -e .[test]`). `tests/test_regression_v6.py` runs the pipeline on `testing_data` (51 Iowa events) and checks it against the paper's V6 tracking code (`Storm_Motion_CONUS` @ e00e55b, fixture `tests/fixtures/v6_reference_testing_data_B7test.csv`): same retained events, analysed windows and coherence classes, motion descriptors equal to 1e-9. `tests/test_coherence_window.py` checks the analysis window and the coherence test (straight track coherent, U-turn not, zero-length segments dropped, seeded reproducibility, null calibration).
 - **Envelope drift of the rain field** (`motion.drift`, `pipeline.summarize_drift` /
   `generate_drift_diagnostics` / `run_drift`, CLI `stormcatalog-analyzer drift [--axis AZ]`).
@@ -58,6 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mean_direction_weighted` crashed for stationary tracks.** It now returns `(nan, nan)` when a track has no
+  step of non-zero length; `compute_storm_trajectory` unpacks two values.
 - **The most-intense window dropped the last centroid and was one field longer for intensity
   and area.** `get_max_accumulated_value(series, '12H')` selected an inclusive window of 13
   hourly fields, while the centroids were sliced `[start:end]` (12 positions, so a track of
@@ -169,4 +190,5 @@ First stable public release.
 - Conda (`environment.yml`) and pip (`requirements.txt`) dependency
   specifications.
 
+[1.1.0]: https://github.com/Perez-HydroSystems/storm-motion-analyzer/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Perez-HydroSystems/storm-motion-analyzer/releases/tag/v1.0.0

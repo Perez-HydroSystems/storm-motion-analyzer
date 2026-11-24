@@ -1,7 +1,7 @@
 {
   "title": "Storm Motion Analyzer",
   "upload_type": "software",
-  "description": "Storm detection and tracking toolkit for characterizing storm motion (trajectory, direction, speed, and angular variance) from hourly gridded rainfall data. It detects storms in NetCDF gridded rainfall data using rainfall thresholding, connected-component labeling, and morphological operations, tracks them through time with overlap-based Lagrangian tracking, and characterizes their motion, intensity, and spatial extent via moment-based ellipse fitting. Designed primarily to process the output storm catalogs produced by the RainyDay stochastic storm transposition framework, and tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data.",
+  "description": "Storm detection and tracking toolkit for characterizing storm motion (trajectory, direction, speed, and angular variance) from hourly gridded rainfall data. It detects storms in NetCDF gridded rainfall data using rainfall thresholding, connected-component labeling, and morphological operations, tracks them through time with overlap-based Lagrangian tracking, and characterizes their motion, intensity, and spatial extent via moment-based ellipse fitting. Designed primarily to process the output storm catalogs produced by the RainyDay stochastic storm transposition framework, and tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data. Version 1.1.0 adds a test of directional coherence of each trajectory, tracking of catalog events on the tile enlarged by a margin, robust linking options for storm merges and splits, and the envelope drift of the rain field.",
   "creators": [
     {
       "name": "Osorio-Giraldo, Diego F.",

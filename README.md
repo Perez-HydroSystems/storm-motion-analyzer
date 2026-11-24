@@ -41,7 +41,7 @@ python run_diagnostics.py --config configs/testing_data.json
 python run_diagnostics.py event --config configs/testing_data.json --storm 100
 ```
  
-If installed with `pip install -e .`, the same commands are available as `stormcatalog-analyzer diagnostics|event ...`.
+If installed with `pip install -e .`, the same commands are available as `stormcatalog-analyzer diagnostics|event|drift|enlarged|systems ...`.
  
 Prefer a notebook? Open [`notebooks/storm_motion_catalog.ipynb`](notebooks/storm_motion_catalog.ipynb) — it loads the config and runs the same pipeline.
  
@@ -75,6 +75,37 @@ Written to `<output_dir>/<domain_name>/`:
 | [`notebooks/storm_motion_catalog.ipynb`](notebooks/storm_motion_catalog.ipynb) | Process all the events in the storm catalog, generating the summary and individual diagnostic plots. |
 | [`notebooks/storm_motion_event.ipynb`](notebooks/storm_motion_event.ipynb) | Per-event spatiotemporal plots and tracking results. |
  
+### Directional coherence
+
+Every storm is tested for directional coherence. The test is a length-weighted Rayleigh test of the hourly movement directions of the analysed window, with a Monte Carlo null and a reproducible seed per storm. The properties table reports `angular_variance`, `p_weighted` and `coherent` (p < 0.05). A coherent storm kept a preferred direction of motion; a non-coherent storm did not (it stalled, turned or meandered). The test describes the directions of motion, not the accuracy of the tracking.
+
+### Enlarged-window tracking
+
+RainyDay screens events tile by tile, and a storm tracked only inside its tile is clipped at the tile edge. The `enlarged` module tracks each catalog event on the tile enlarged by a margin (default 5°), reading the hourly rain field directly (AORC), and selects the storm of the event by the screening circle.
+
+```bash
+# one tile: events table (parquet) and storm footprints next to it
+stormcatalog-analyzer enlarged --catalog-dir <tile>/StormCatalog --aorc-dir <AORC folder> --tile B7 --out out/B7.parquet
+
+# storm systems shared by several tiles
+stormcatalog-analyzer systems --footprints out/*_footprints.parquet --out out/systems.csv
+```
+
+Each event records the motion descriptors and the coherence test, the share of the storm's rain outside the tile, the valid-data fraction, edge contacts, and the jumps of the centroid (an hourly step more than 3 times the median step and more than 30 km).
+
+### Robust linking
+
+A jump occurs when a track changes composition at a merge or a split. `tracking.robust` adds linking options that reduce these jumps; all are off by default, and the default settings reproduce the standard linking. `PRESETS` names the combinations. The storm-motion paper uses `partition_keepsplit`: when two storms merge, the merged object is divided among its parents, so each track follows its own rain.
+
+```python
+from stormcatalog_analyzer import enlarged as E
+from stormcatalog_analyzer.tracking import robust
+
+E.register_tracker("robust_pks", robust.enlarged_tracker("partition_keepsplit"))
+cfg = E.EnlargedConfig(margin_deg=5.0, tracker="robust_pks")
+events, footprints = E.run_catalog("<tile>/StormCatalog", "<AORC folder>", cfg, tile="B7", workers=4)
+```
+
 ## What it extracts
  
 - **Motion** — trajectory, translation speed, direction, spatial probability of direction motion.
@@ -104,7 +135,7 @@ python run_diagnostics.py drift --config configs/testing_data.json --axis 156   
 
 If you use this software, please cite it — GitHub's "Cite this repository" button (generated from [`CITATION.cff`](CITATION.cff)) gives ready-made BibTeX/APA entries:
 
-> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21382061
+> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21382060
 
 To cite all versions of the software, use the concept DOI [10.5281/zenodo.21382060](https://doi.org/10.5281/zenodo.21382060), which always resolves to the latest release.
 

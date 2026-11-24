@@ -8,7 +8,9 @@ abstract: >-
   rainfall data. Designed primarily to process the output storm catalogs
   produced by the RainyDay stochastic storm transposition framework, and
   tested using NOAA's Analysis of Record for Calibration (AORC) rainfall
-  data.
+  data. Version 1.1.0 adds a test of directional coherence, tracking of
+  catalog events on the tile enlarged by a margin, robust linking options
+  for storm merges and splits, and the envelope drift of the rain field.
 authors:
   - family-names: "Osorio-Giraldo"
     given-names: "Diego F."
@@ -18,9 +20,9 @@ authors:
     given-names: "Gabriel"
     orcid: "https://orcid.org/0000-0003-3880-0874"
     affiliation: "School of Civil and Environmental Engineering, Oklahoma State University"
-version: "1.0.0"
-date-released: "2026-07-15"
-doi: "10.5281/zenodo.21382061"
+version: "1.1.0"
+date-released: "2026-11-23"
+doi: "10.5281/zenodo.21382060"
 identifiers:
   - type: doi
     value: "10.5281/zenodo.21382060"
