@@ -21,8 +21,8 @@ authors:
     orcid: "https://orcid.org/0000-0003-3880-0874"
     affiliation: "School of Civil and Environmental Engineering, Oklahoma State University"
 version: "1.1.0"
-date-released: "2026-11-23"
-doi: "10.5281/zenodo.21382060"
+date-released: "2026-11-24"
+doi: "10.5281/zenodo.24487598"
 identifiers:
   - type: doi
     value: "10.5281/zenodo.21382060"
@@ -30,6 +30,9 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.21382061"
     description: "Version DOI for v1.0.0."
+  - type: doi
+    value: "10.5281/zenodo.24487598"
+    description: "Version DOI for v1.1.0."
 license: MIT
 repository-code: "https://github.com/Perez-HydroSystems/storm-motion-analyzer"
 keywords:

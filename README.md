@@ -135,7 +135,7 @@ python run_diagnostics.py drift --config configs/testing_data.json --axis 156   
 
 If you use this software, please cite it — GitHub's "Cite this repository" button (generated from [`CITATION.cff`](CITATION.cff)) gives ready-made BibTeX/APA entries:
 
-> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21382060
+> Osorio-Giraldo, D. F., & Perez, G. (2026). *Storm Motion Analyzer* (Version 1.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24487598
 
 To cite all versions of the software, use the concept DOI [10.5281/zenodo.21382060](https://doi.org/10.5281/zenodo.21382060), which always resolves to the latest release.
 
