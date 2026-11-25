@@ -11,7 +11,9 @@ Storm-Motion-Analyzer detects storms in NetCDF gridded rainfall data using rainf
  
 The package is designed primarily to process the output storm catalogs produced by the [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay) stochastic storm transposition framework, but it works with any hourly gridded NetCDF rainfall dataset. The toolkit has been tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data.
 
-![Storm tracking demo](storm_tracking_process.gif)
+![The tracking of one storm in three steps: the rain in motion, the identified storm with its fitted ellipse and centroid, and the track with the motion properties](docs/animations/tracking_steps.gif)
+
+*A convective system over the northern Plains on 8 August 2020 (AORC hourly precipitation). The dark outline is the storm that is identified and tracked, and its rain-weighted centroid gives the track. The ellipse is fitted to the main rain core of the storm and describes its size and orientation, so it is smaller than the outline.*
 
 ## Storm motion at a glance
 
@@ -172,7 +174,7 @@ Options of the enlarged-window tracking (`EnlargedConfig`, and the same names in
 | Option | Meaning |
 |---|---|
 | `margin_deg` | Degrees added to each side of the tile (default 5). |
-| `analysis_hours` | `"intensity"` (default): the 12 hours with the most intense rain of the storm. `"tile"`: the 12 hours with most rain of the storm over the tile (`--analysis-hours tile`). |
+| `analysis_hours` | Which 12 consecutive hours of a longer track are analysed. `"intensity"` (default): the largest mean rain rate inside the fitted ellipse. `"rate"`: the largest mean rain rate of the identified storm (no ellipse). `"tile"`: the most rain of the storm over the tile. Command line: `--analysis-hours`. |
 | `core_threshold_mmhr` | Identify the storms by their cores above this rate, so that storms joined by light rain stay separate (`--core-threshold 2`; needs a `robust:` tracker). |
 | `linger_class` | Add the stall / turn / meander class. |
 | `pattern` | Add the rain-pattern and propagation velocities. |

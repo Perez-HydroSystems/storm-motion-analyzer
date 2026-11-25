@@ -1,5 +1,7 @@
 """Animated GIFs of storm motion: the hourly rain, the tracked storm core and the track of its rain mass.
 
+``animate_tracking_steps`` one storm in three steps: the rain in motion; the identified storm (outline), its fitted
+                           ellipse and its centroid hour by hour; the whole track with the motion properties
 ``animate_storm_motion``   one panel per storm, all at the same map scale, so that the distances the storms cover can
                            be compared (for example a storm that travels next to storms that stall, turn or meander)
 ``animate_two_motions``    one storm with its two motions: the track of the rain mass and the track that the rain
@@ -20,6 +22,12 @@ A storm is a dict with
     circle      (lon, lat, radius in km) of a reference location (optional; drawn as a circle)
     ref_lon,    hourly positions of an independent track at the same hours (optional, NaN where it has none; drawn
     ref_lat     hour by hour in a second colour); ``ref_label`` its name in the legend
+for ``animate_tracking_steps``,
+    direction_deg  mean direction of motion, degrees counter-clockwise from east (optional; default: the direction of
+                   the net displacement); drawn as an arrow in the last step
+    properties     ordered mapping {name: text} shown in a box in the last step, for example
+                   {"Direction": "341° counter-clockwise from east", "Path speed": "12.4 m/s"} (optional; default: the
+                   path and net lengths of the track)
 and, for ``animate_two_motions``,
     step_u,     hourly rain-pattern velocity (m/s, east and north) of each step, as given by
     step_v      ``motion.pattern.storm_pattern`` (nt - 1 values, or nt with a last value that is not used)
@@ -194,16 +202,19 @@ def _colorbar(fig, rect):
     return cax
 
 
-def _save(frames: list, path, fps: float, hold_frames: int) -> Path:
-    """Write the frames (RGB arrays) as a looping GIF; the last frame is held for ``hold_frames`` frame times."""
+def _save(frames: list, path, fps: float, hold_frames: int, holds: dict = None) -> Path:
+    """Write the frames (RGB arrays) as a looping GIF; the last frame is held for ``hold_frames`` frame times, and
+    the frames in ``holds`` ({frame index: frame times}) for theirs."""
     from PIL import Image
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     imgs = [Image.fromarray(f).quantize(colors=128, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
             for f in frames]
     ms = int(round(1000 / fps))
-    imgs[0].save(path, save_all=True, append_images=imgs[1:], loop=0, optimize=True,
-                 duration=[ms] * (len(imgs) - 1) + [ms * max(hold_frames, 1)], disposal=1)
+    duration = [ms] * (len(imgs) - 1) + [ms * max(hold_frames, 1)]
+    for k, times in (holds or {}).items():
+        duration[k] = ms * max(int(times), 1)
+    imgs[0].save(path, save_all=True, append_images=imgs[1:], loop=0, optimize=True, duration=duration, disposal=1)
     return path
 
 
@@ -384,3 +395,134 @@ def animate_two_motions(storm, save_path, half_width_km: float = 500.0, half_hei
         velocity_panel(k, final)
         frames.append(_grab(fig))
     return _save(frames, save_path, fps, hold_frames)
+
+
+def animate_tracking_steps(storm, save_path, title_prefix: str = "", subtitle: str = None, half_width_km: float = None,
+                           scale_km: float = None, fps: float = 3.0, hold_frames: int = 14, dpi: int = 100,
+                           panel_width_in: float = 7.6, borders: bool = True) -> Path:
+    """GIF of the tracking of one storm, in three steps. Returns the path of the GIF.
+
+    1. The storm in motion: all the rain of each hour.
+    2. Identifying and tracking the storm: the outline of the identified storm (the rain area that is tracked), the
+       ellipse fitted to it and its rain-weighted centroid, with the track growing hour by hour.
+    3. Trajectory and motion properties: the whole track, the mean direction, and a box with the properties.
+
+    The ellipse is the one of the tracking (``tracking.catalog.fit_ellipse_to_rainfall``: moments of the rain of the
+    storm above its median rate of that hour). It describes the size and the orientation of the main rain core, so it
+    is smaller than the identified storm; the track uses the centroid of the whole identified storm, not the ellipse.
+
+    storm           storm dict (see the module docstring); ``mask`` is needed
+    half_width_km   half width of the map (km); default: fitted to the track and the storm. The map is 4:3.
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Ellipse, Rectangle
+
+    from ..tracking.catalog import fit_ellipse_to_rainfall
+    s = _prepare(storm)
+    n = s["n"]
+    X, Y = np.meshgrid(s["x"], s["y"])
+    ell = []
+    for k in range(n):
+        f = np.where(np.asarray(s["mask"][k], bool), np.asarray(s["rain"][k], float), 0.0)
+        e = fit_ellipse_to_rainfall(f, X, Y, np.quantile(f[f != 0], 0.5)) if np.any(f != 0) else None
+        ell.append(None if e is None else (e["major_axis_length"], e["minor_axis_length"], e["angle"]))
+    if half_width_km is None:
+        reach = 0.5 * max((e[0] for e in ell if e is not None), default=0.0) + 110.0
+        hw = max(np.abs(s["tx"]).max() + reach, (np.abs(s["ty"]).max() + reach) * 4 / 3)
+        half_width_km = min(hw, 0.98 * min(-s["x"].min(), s["x"].max()), 0.98 * min(-s["y"].min(), s["y"].max()) * 4 / 3)
+    half = (float(half_width_km), 0.75 * float(half_width_km))
+    if scale_km is None:
+        scale_km = 200.0 if half[0] > 450 else 100.0
+    s["borders"] = _borders(s, half) if borders else []
+    cmap, norm = _rain_style()
+    side, top, bottom = 0.15, (1.22 if subtitle else 0.86), 1.06
+    pw, ph = panel_width_in, panel_width_in * 0.75
+    W, H = 2 * side + pw, top + bottom + ph
+    fig = Figure(figsize=(W, H), dpi=dpi, facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    ax = fig.add_axes([side / W, bottom / H, pw / W, ph / H])
+    banner = fig.text(side / W, 1 - 0.36 / H, "", fontsize=16, fontweight="bold", color=INK, ha="left", va="center")
+    if subtitle:
+        fig.text(side / W, 1 - 0.70 / H, subtitle, fontsize=10.5, color=INK2, ha="left", va="center")
+    _colorbar(fig, [(W - side - 2.5) / W, 0.56 / H, 2.5 / W, 0.17 / H])
+    handles = [Line2D([], [], color=INK, lw=1.4, label="Identified storm (the rain area that is tracked)"),
+               Line2D([], [], color=MASS, lw=2.0, label="Fitted ellipse (main rain core, smaller than the outline)"),
+               Line2D([], [], color=MASS, lw=2.2, marker="o", ms=6, mec=SURFACE, label="Centroid and its track"),
+               Line2D([], [], color=INK, lw=2.6, marker=">", ms=7, label="Mean direction")]
+    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(side / W * 0.6, 0.06 / H), ncols=1, frameon=False,
+               fontsize=9.5, labelcolor=INK, handlelength=2.6, labelspacing=0.35)
+    titles = {"move": "1. The storm in motion", "track": "2. Identifying and tracking the storm",
+              "final": "3. Trajectory and motion properties"}
+    net = float(s["net_km"][-1])
+    th = (np.radians(float(s["direction_deg"])) if s.get("direction_deg") is not None
+          else np.arctan2(s["ty"][-1] - s["ty"][0], s["tx"][-1] - s["tx"][0]))
+    xm, ym, L = float(s["tx"].mean()), float(s["ty"].mean()), 0.5 * net
+    props = s.get("properties") or {"Path length": f"{s['path_km'][-1]:.0f} km", "Net length": f"{net:.0f} km"}
+    box = "\n".join("$\\mathbf{" + str(k).replace(" ", "\\ ") + "}$: " + str(v) for k, v in props.items())
+
+    def draw(phase, k):
+        ax.clear()
+        ax.set_facecolor(SURFACE)
+        for bx, by in s["borders"]:
+            ax.plot(bx, by, color=LAND, lw=0.7, zorder=1)
+        rain = np.asarray(s["rain"][k], float)
+        ax.pcolormesh(s["x"], s["y"], np.where(rain >= RAIN_LEVELS[0], rain, np.nan), cmap=cmap, norm=norm,
+                      shading="nearest", zorder=2, rasterized=True, alpha=0.35 if phase == "final" else 1.0)
+        if phase == "track":
+            if np.any(s["mask"][k]):
+                ax.contour(s["x"], s["y"], np.asarray(s["mask"][k], float), levels=[0.5], colors=[INK], linewidths=1.3,
+                           zorder=3)
+            if ell[k] is not None:                                      # drawn at the centroid of the identified storm
+                ax.add_patch(Ellipse((s["tx"][k], s["ty"][k]), width=ell[k][0], height=ell[k][1], angle=ell[k][2],
+                                     edgecolor=MASS, facecolor="none", linewidth=2.0, zorder=5, path_effects=_HALO))
+        if phase in ("track", "final"):
+            upto = n if phase == "final" else k + 1
+            ax.plot(s["tx"][:upto], s["ty"][:upto], color=MASS, lw=2.2, zorder=6, path_effects=_HALO,
+                    solid_capstyle="round")
+            ax.scatter(s["tx"][:upto], s["ty"][:upto], s=22, color=MASS, edgecolor=SURFACE, linewidth=0.8, zorder=7)
+            ax.scatter(s["tx"][0], s["ty"][0], s=46, facecolor=SURFACE, edgecolor=MASS, linewidth=1.8, zorder=8)
+            ax.scatter(s["tx"][upto - 1], s["ty"][upto - 1], s=70, color=MASS, edgecolor=SURFACE, linewidth=1.6, zorder=9)
+        if phase == "final":
+            ox, oy = -0.07 * half[0] * np.sin(th), 0.07 * half[0] * np.cos(th)      # beside the track, not over it
+            ax.add_patch(FancyArrowPatch((xm + ox - L * np.cos(th), ym + oy - L * np.sin(th)),
+                                         (xm + ox + L * np.cos(th), ym + oy + L * np.sin(th)),
+                                         arrowstyle="-|>", mutation_scale=22, lw=2.8, color=INK, zorder=8,
+                                         path_effects=[pe.Stroke(linewidth=5.0, foreground=SURFACE), pe.Normal()]))
+            corners = {(0.03, 0.97, "left", "top"): (-half[0], half[1]), (0.97, 0.97, "right", "top"): (half[0], half[1]),
+                       (0.03, 0.13, "left", "bottom"): (-half[0], -half[1]),
+                       (0.97, 0.13, "right", "bottom"): (half[0], -half[1])}
+            c = max(corners, key=lambda q: np.hypot(s["tx"] - corners[q][0], s["ty"] - corners[q][1]).min())
+            ax.text(c[0], c[1], box, transform=ax.transAxes, fontsize=11.5, va=c[3], ha=c[2], zorder=13, linespacing=1.6,
+                    color=INK, multialignment="left",
+                    bbox=dict(boxstyle="round,pad=0.6", facecolor=SURFACE, edgecolor=RULE, linewidth=1.2, alpha=0.96))
+        ax.set_xlim(-half[0], half[0])
+        ax.set_ylim(-half[1], half[1])
+        ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_color(RULE)
+            sp.set_linewidth(1.0)
+        ax.add_patch(Rectangle((0, 0), 1, 0.092, transform=ax.transAxes, facecolor=SURFACE, edgecolor="none", alpha=0.90,
+                               zorder=11))
+        clock = ""
+        if s.get("times") is not None:
+            import pandas as pd
+            ts = pd.Timestamp(str(s["times"][k]))
+            clock = f"{ts.day} {ts:%b %Y %H:%M} UTC     "
+        lengths = "" if phase == "move" else f"Path {s['path_km'][k]:.0f} km     Net {s['net_km'][k]:.0f} km"
+        ax.text(0.02, 0.046, clock + lengths, transform=ax.transAxes, ha="left", va="center", fontsize=9.5, color=INK,
+                zorder=12)
+        x1, x0 = 0.98, 0.98 - scale_km / (2 * half[0])
+        ax.plot([x0, x1], [0.030, 0.030], transform=ax.transAxes, color=INK, lw=2.0, solid_capstyle="butt", zorder=12)
+        ax.text(0.5 * (x0 + x1), 0.040, f"{scale_km:.0f} km", transform=ax.transAxes, ha="center", va="bottom",
+                fontsize=8.5, color=INK, zorder=12)
+        banner.set_text(title_prefix + titles[phase])
+
+    plan = [("move", k) for k in range(n)] + [("track", k) for k in range(n)] + [("final", n - 1)]
+    frames = []
+    for phase, k in plan:
+        draw(phase, k)
+        frames.append(_grab(fig))
+    return _save(frames, save_path, fps, hold_frames, holds={n - 1: 3, 2 * n - 1: 4})

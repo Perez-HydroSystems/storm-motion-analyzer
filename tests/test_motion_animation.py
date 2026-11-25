@@ -3,7 +3,8 @@ import numpy as np
 import pytest
 from scipy import ndimage
 
-from stormcatalog_analyzer.plotting.motion_animation import animate_storm_motion, animate_two_motions
+from stormcatalog_analyzer.plotting.motion_animation import (animate_storm_motion, animate_tracking_steps,
+                                                             animate_two_motions)
 
 PIL = pytest.importorskip("PIL.Image")
 LAT = 40 + np.arange(90) / 30.0
@@ -44,3 +45,13 @@ def test_frame_step_keeps_the_last_hour(tmp_path):
     p = animate_storm_motion([s], tmp_path / "c.gif", ncols=1, half_width_km=250, half_height_km=200, scale_km=100,
                              borders=False, dpi=50, frame_step=4)
     assert PIL.open(p).n_frames == 3                      # hours 0 and 4, and the last hour
+
+
+def test_tracking_steps_gif(tmp_path):
+    s = storm(6)
+    s.update(direction_deg=56.0, properties={"Direction": "56° counter-clockwise from east", "Path speed": "10.0 m/s"})
+    p = animate_tracking_steps(s, tmp_path / "d.gif", subtitle="synthetic", borders=False, dpi=50)
+    im = PIL.open(p)
+    assert im.n_frames == 13 and im.info.get("loop") == 0   # 6 hours of rain, 6 hours of tracking, and the summary
+    p = animate_tracking_steps(storm(5), tmp_path / "e.gif", borders=False, dpi=50)          # defaults
+    assert PIL.open(p).n_frames == 11

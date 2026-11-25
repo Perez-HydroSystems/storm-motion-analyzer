@@ -2,6 +2,8 @@
 
     python docs/animations/make_readme_animations.py
 
+tracking_steps.gif         the tracking of one storm in three steps: the rain, the identified storm with its
+                           ellipse and centroid, and the track with the motion properties
 storm_motion_classes.gif   four storms at the same scale: one that travels (coherent) and three that linger
                            (stall, turn, meander)
 two_motions.gif            one storm with its two motions: the rain mass and the rain pattern
@@ -13,6 +15,7 @@ shown are the hours with most storm rainfall over the tile (``analysis_hours="ti
     A4_073   27 June 2019        travel        D7_001   29 August 2017   stall (Hurricane Harvey)
     B7_098   20 June 2016        turn          C9_264   20 July 2023     meander
     C7_337   9 June 2008         two motions (mesoscale convective system)
+    A7_111   8 August 2020       tracking in three steps (convective system, northern Plains)
 The rain-pattern velocities of the second animation are computed here with ``motion.pattern.storm_pattern``. The files
 in ``docs/animations/data`` are made with ``extract_examples.py``, and the one of the long track (``harvey_2017``, tracked
 from 25 August 2017 with storms identified from 2 mm/h cores) with ``extract_long_event.py``.
@@ -22,7 +25,8 @@ from pathlib import Path
 import numpy as np
 
 from stormcatalog_analyzer.motion.pattern import storm_pattern
-from stormcatalog_analyzer.plotting.motion_animation import animate_storm_motion, animate_two_motions
+from stormcatalog_analyzer.plotting.motion_animation import (animate_storm_motion, animate_tracking_steps,
+                                                             animate_two_motions)
 
 HERE = Path(__file__).resolve().parent
 
@@ -62,6 +66,20 @@ def main():
                  "The rain pattern follows the displacement of the rain features."))
 
 
+def tracking_steps():
+    z = np.load(HERE / "data" / "A7_111.npz")
+    s = load("A7_111")
+    s.update(direction_deg=float(z["direction_deg"]),
+             properties={"Direction": f"{float(z['direction_deg']) % 360:.0f}° counter-clockwise from east",
+                         "Path speed": f"{float(z['path_speed_ms']):.1f} m/s",
+                         "Net speed": f"{float(z['net_speed_ms']):.1f} m/s",
+                         "Mean rain rate": f"{float(z['mean_rate_mmh']):.1f} mm/h",
+                         "Angular variance": f"{float(z['angular_variance']):.2f}"})
+    print(animate_tracking_steps(
+        s, HERE / "tracking_steps.gif",
+        subtitle="A convective system over the northern Plains, 8 August 2020. Hourly rainfall, 12 hours."))
+
+
 def long_track():
     z = np.load(HERE / "data" / "harvey_2017.npz")
     shape, n, step = tuple(z["shape"]), z["track_lon"].size, int(z["frame_step"])
@@ -79,5 +97,6 @@ def long_track():
 
 
 if __name__ == "__main__":
+    tracking_steps()
     main()
     long_track()

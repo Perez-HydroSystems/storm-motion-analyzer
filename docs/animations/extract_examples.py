@@ -56,7 +56,8 @@ def main(aorc, event_file, tile, uid, large=False):
                         linger_class=str(row["linger_class"]), tile=str(tile), tile_bounds=np.array(ev.tile_bounds),
                         direction_deg=float(row["big_direction_deg"]),
                         pattern_direction_deg=float(row["pattern_direction_deg"]), pattern_speed=float(row["pattern_speed"]),
-                        net_speed_ms=float(row["big_net_speed_ms"]))
+                        net_speed_ms=float(row["big_net_speed_ms"]), path_speed_ms=float(row["big_path_speed_ms"]),
+                        angular_variance=float(row["big_angular_variance"]), mean_rate_mmh=float(row["big_avg_intensity_mmh"]))
     print(uid, rain.shape, str(row["linger_class"]), f"{(OUT / f'{uid}.npz').stat().st_size / 1e6:.2f} MB")
 
 
