@@ -11,6 +11,8 @@ Storm-Motion-Analyzer detects storms in NetCDF gridded rainfall data using rainf
  
 The package is designed primarily to process the output storm catalogs produced by the [RainyDay](https://github.com/HydroclimateExtremesGroup/RainyDay) stochastic storm transposition framework, but it works with any hourly gridded NetCDF rainfall dataset. The toolkit has been tested using NOAA's Analysis of Record for Calibration (AORC) rainfall data.
 
+> **New since version 1.1.0, not yet in a release:** the rain-pattern motion, the stall / turn / meander classes, the conditions of the track, new tracking options and the animations shown below. The DOI above is version 1.1.0. See the [changelog](CHANGELOG.md).
+
 ![The tracking of one storm in three steps: the rain in motion, the identified storm with its fitted ellipse and centroid, and the track with the motion properties](docs/animations/tracking_steps.gif)
 
 *A convective system over the northern Plains on 8 August 2020 (AORC hourly precipitation). The dark outline is the storm that is identified and tracked, and its rain-weighted centroid gives the track. The ellipse is fitted to the main rain core of the storm and describes its size and orientation, so it is smaller than the outline.*
