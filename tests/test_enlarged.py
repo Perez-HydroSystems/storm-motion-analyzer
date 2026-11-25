@@ -274,6 +274,17 @@ def test_analysis_hours_tile_keeps_the_hours_over_the_tile():
         analyze_event(ev, fld, EnlargedConfig(margin_deg=0, analysis_hours="other"), tile="SYN", with_tile=False)
 
 
+def test_analysis_hours_rate_takes_the_hours_of_largest_storm_rate():
+    fld, ev, _ = _passing_storm()
+    rows = {rule: analyze_event(ev, fld, EnlargedConfig(margin_deg=0, analysis_hours=rule), tile="SYN", with_tile=False)[0]
+            for rule in ("intensity", "rate", "tile")}
+    r = rows["rate"]
+    assert r["retained"] and r["big_n_positions"] == 12 and r["analysis_hours"] == "rate"
+    assert r["big_track_positions"] == rows["intensity"]["big_track_positions"]              # the same whole track
+    # no other window of 12 hours has a larger mean rain rate of the storm
+    assert all(r["big_avg_intensity_mmh"] >= rows[k]["big_avg_intensity_mmh"] - 1e-9 for k in ("intensity", "tile"))
+
+
 def test_core_threshold_separates_storms_joined_by_light_rain():
     fld, ev, _ = _passing_storm()
     rain = fld.rain.copy()

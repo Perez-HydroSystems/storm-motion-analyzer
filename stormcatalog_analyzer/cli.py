@@ -131,9 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tile", action="store_true", help="Skip the tile-only V6 comparison.")
     p.add_argument("--linking", help="Preset of tracking.robust for the linking, e.g. partition_keepsplit "
                                      "(default: the standard linking).")
-    p.add_argument("--analysis-hours", default="intensity", choices=("intensity", "tile"),
-                   help="Analysed hours: those of largest storm intensity (default), or those with most rain of the "
-                        "storm over the tile.")
+    p.add_argument("--analysis-hours", default="intensity", choices=("intensity", "rate", "tile"),
+                   help="Analysed hours: those of largest mean rain rate inside the fitted ellipse (default), those of "
+                        "largest mean rain rate of the identified storm (rate), or those with most rain of the storm "
+                        "over the tile (tile).")
     p.add_argument("--core-threshold", type=float,
                    help="With --linking: identify the storms from cores of this rain rate (mm/h), grown into the rain area.")
     p.add_argument("--conditions", action="store_true",

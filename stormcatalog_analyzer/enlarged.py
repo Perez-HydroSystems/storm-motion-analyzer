@@ -102,8 +102,10 @@ class EnlargedConfig:
     pattern_cross_check: bool = True        # ... with the two optical-flow cross-checks (pattern_robust)
     conditions: bool = False                # add the conditions of the track (conditions.py): window edge, two
     #                                         distant pieces, absorbed rain area, scattered core
-    analysis_hours: str = "intensity"       # analysed window: "intensity" (the hours of largest storm intensity) |
-    #                                         "tile" (the hours with most rain of the storm over the tile)
+    analysis_hours: str = "intensity"       # analysed window: "intensity" (the hours of largest mean rain rate
+    #                                         inside the fitted ellipse) | "rate" (the hours of largest mean rain
+    #                                         rate of the identified storm; no ellipse) | "tile" (the hours with
+    #                                         most rain of the storm over the tile)
     core_threshold_mmhr: Optional[float] = None   # "robust:<preset>" trackers: identify the storms from cores of
     #                                               this rain rate, grown into the rain area (None: all rain area)
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
@@ -643,10 +645,17 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
                 vol_tile = [float((rain0[t] * area)[(labels[t] == k) & inside].sum()) for t in hours]
                 a, b = select_analysis_window(vol_tile, max_positions=cfg.window_hr)
                 win = hours[a:b]
+            elif cfg.analysis_hours == "rate":                     # the hours of largest mean rain rate of the storm
+                rate = []                                          # (area-weighted mean over its rain cells, as the
+                for t in hours:                                    # descriptor avg_intensity_mmh)
+                    m = (labels[t] == k) & (rain0[t] > 0)
+                    rate.append(float((rain0[t] * area)[m].sum() / area[m].sum()) if m.any() else 0.0)
+                a, b = select_analysis_window(rate, max_positions=cfg.window_hr)
+                win = hours[a:b]
             elif cfg.analysis_hours != "intensity":
                 raise ValueError(cfg.analysis_hours)
             d = v6_descriptors(rain0, labels, k, win, fld.lat, fld.lon, fld.times, seed_key, cfg)
-            if d is not None and cfg.analysis_hours == "tile":     # positions of the whole track, as for "intensity"
+            if d is not None and cfg.analysis_hours in ("tile", "rate"):   # positions of the whole track, as for "intensity"
                 d["track_positions"], d["window_start"] = int(len(hours)), int(win[0] - hours[0])
             for _ in range(3):   # v1: the analysed window must itself be jump-free (jumps judged on the window)
                 if cfg.jump_rule != "split" or d is None or d["n_jumps"] == 0:
