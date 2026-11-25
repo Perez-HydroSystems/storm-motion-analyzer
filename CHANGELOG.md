@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rain-pattern velocity and propagation** (`stormcatalog_analyzer/motion/pattern.py`, `EnlargedConfig.pattern`,
+  CLI `enlarged --pattern`). A storm has two motions. The rain mass is the motion of the rain-weighted centroid. The
+  rain pattern is the displacement of the rain features from one hour to the next, measured by a storm-masked
+  cross-correlation of consecutive hours with quality control (correlation, speed, reversal). The propagation is the
+  difference between the two. Two optical-flow estimates are computed as a cross-check (`pattern_robust`).
+- **Stall, turn and meander classes** (`stormcatalog_analyzer/motion/linger.py`, `EnlargedConfig.linger_class`, CLI
+  `enlarged --classes`). A storm that keeps a preferred direction travels (coherent). A storm that does not is
+  classified from its track and core area as a stall, a turn or a meander (column `linger_class`).
+- **Analysed hours** (`EnlargedConfig.analysis_hours`, CLI `--analysis-hours`). A track longer than 12 hours is
+  reduced to 12 consecutive hours. `"intensity"` (default, as before) takes the hours of largest mean rain rate inside
+  the fitted ellipse. `"rate"` takes the hours of largest mean rain rate of the identified storm, and does not need
+  the ellipse. `"tile"` takes the hours with most rain of the storm over the tile.
+- **Identification by cores** (`EnlargedConfig.core_threshold_mmhr`, CLI `--core-threshold`). With the robust linking
+  presets, the storms are identified from cores of a given rain rate, grown into the rain area. Systems joined only
+  by light rain stay separate.
+- **Conditions of the track** (`stormcatalog_analyzer/conditions.py`, `EnlargedConfig.conditions`, CLI
+  `--conditions`). Flags for the situations in which the centroid moves for reasons other than the motion of the
+  rain: the storm spans or leaves the tracking window, it has two distant pieces, it absorbs another rain area, or
+  its core is scattered (`flag_window`, `flag_two_pieces`, `flag_absorbed`, `flag_scattered`, `track_condition`).
+- **Linking presets by name** (`tracker="robust:<preset>"`, CLI `enlarged --linking <preset>`). A preset of
+  `tracking.robust` needs no registration and works in worker processes.
+- **Animations of storm motion** (`stormcatalog_analyzer/plotting/motion_animation.py`):
+  `animate_tracking_steps` (one storm in three steps: the rain, the identified storm with its fitted ellipse and
+  centroid, and the track with the motion properties), `animate_storm_motion` (one panel per storm at a common map
+  scale; `frame_step` for tracks of several days; an independent reference track with `ref_lon`, `ref_lat`,
+  `ref_label`) and `animate_two_motions` (the rain mass and the rain pattern of one storm).
+- **README**: section "Storm motion at a glance" with the motion properties, the travel / stall / turn / meander
+  classes, the two motions of a storm, a storm followed for a week in one run (Hurricane Harvey, 153 hours), and how
+  robust the class of one storm is. The example storms and the scripts that make the animations are in
+  `docs/animations/`.
+
+### Changed
+
+- The first animation of the README is `docs/animations/tracking_steps.gif`. It replaces
+  `storm_tracking_process.gif`, which is removed. The new animation shows all the rain and the outline of the
+  identified storm, so the ellipse is seen as a description of the main rain core and not as the storm that is
+  tracked.
+
+### Notes
+
+- All the new options are off by default. The default storm table is unchanged from 1.1.0.
+
 ## [1.1.0] - 2026-11-24
 
 ### Added
