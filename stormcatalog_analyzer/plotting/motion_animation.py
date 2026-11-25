@@ -13,6 +13,13 @@ A storm is a dict with
     track_lat
     label       title of the panel; ``sublabel`` an optional short description next to it
     times       time of each hour (optional; shown as a clock in the panel)
+    center      (lon, lat) of the centre of the map (optional; default: the centre of the track), so that several
+                panels can show the same area
+    window      (west, east, south, north) of the tracking window (optional; drawn as a dashed rectangle)
+    tile        (west, east, south, north) of a reference area (optional; drawn as a solid rectangle)
+    circle      (lon, lat, radius in km) of a reference location (optional; drawn as a circle)
+    ref_lon,    hourly positions of an independent track at the same hours (optional, NaN where it has none; drawn
+    ref_lat     hour by hour in a second colour); ``ref_label`` its name in the legend
 and, for ``animate_two_motions``,
     step_u,     hourly rain-pattern velocity (m/s, east and north) of each step, as given by
     step_v      ``motion.pattern.storm_pattern`` (nt - 1 values, or nt with a last value that is not used)
@@ -57,7 +64,10 @@ def _prepare(storm: dict) -> dict:
     """Coordinates in km from the centre of the track, and the path and net lengths up to each hour."""
     s = dict(storm)
     tl, ta = np.asarray(s["track_lon"], float), np.asarray(s["track_lat"], float)
-    s["lon0"], s["lat0"] = 0.5 * (tl.min() + tl.max()), 0.5 * (ta.min() + ta.max())
+    ok = np.isfinite(tl) & np.isfinite(ta)
+    s["lon0"], s["lat0"] = 0.5 * (tl[ok].min() + tl[ok].max()), 0.5 * (ta[ok].min() + ta[ok].max())
+    if s.get("center") is not None:
+        s["lon0"], s["lat0"] = float(s["center"][0]), float(s["center"][1])
     s["kx"], s["ky"] = KM_DEG * np.cos(np.radians(s["lat0"])), KM_DEG
     s["x"], s["y"] = (np.asarray(s["lon"], float) - s["lon0"]) * s["kx"], (np.asarray(s["lat"], float) - s["lat0"]) * s["ky"]
     s["tx"], s["ty"] = (tl - s["lon0"]) * s["kx"], (ta - s["lat0"]) * s["ky"]
@@ -96,6 +106,20 @@ def _panel(ax, s: dict, k: int, final: bool, half: tuple, scale_km: float, patte
     ax.set_facecolor(SURFACE)
     for bx, by in s["borders"]:
         ax.plot(bx, by, color=LAND, lw=0.7, zorder=1)
+    if s.get("window") is not None:                                     # the tracking window
+        w, e, so, no = s["window"]
+        bx = (np.array([w, e, e, w, w]) - s["lon0"]) * s["kx"]
+        by = (np.array([so, so, no, no, so]) - s["lat0"]) * s["ky"]
+        ax.plot(bx, by, color=INK2, lw=1.0, ls=(0, (5, 3)), zorder=4)
+    if s.get("tile") is not None:                                       # a reference area, drawn over the rain
+        w, e, so, no = s["tile"]
+        ax.plot((np.array([w, e, e, w, w]) - s["lon0"]) * s["kx"], (np.array([so, so, no, no, so]) - s["lat0"]) * s["ky"],
+                color=INK, lw=1.3, zorder=4.5, path_effects=[pe.Stroke(linewidth=3.0, foreground=SURFACE), pe.Normal()])
+    if s.get("circle") is not None:
+        cl, ca, cr = s["circle"]
+        th = np.linspace(0, 2 * np.pi, 91)
+        ax.plot((cl - s["lon0"]) * s["kx"] + cr * np.cos(th), (ca - s["lat0"]) * s["ky"] + cr * np.sin(th), color=INK,
+                lw=1.3, zorder=4.5, path_effects=[pe.Stroke(linewidth=3.0, foreground=SURFACE), pe.Normal()])
     rain = np.asarray(s["rain"][k], float)
     ax.pcolormesh(s["x"], s["y"], np.where(rain >= RAIN_LEVELS[0], rain, np.nan), cmap=cmap, norm=norm,
                   shading="nearest", zorder=2, rasterized=True)
@@ -110,6 +134,12 @@ def _panel(ax, s: dict, k: int, final: bool, half: tuple, scale_km: float, patte
             solid_capstyle="round")
     if k > 0:
         ax.scatter(s["tx"][1:k], s["ty"][1:k], s=13, color=MASS, edgecolor=SURFACE, linewidth=0.7, zorder=7)
+    if s.get("ref_lon") is not None:                                    # an independent track, hour by hour
+        rx = (np.asarray(s["ref_lon"], float) - s["lon0"]) * s["kx"]
+        ry = (np.asarray(s["ref_lat"], float) - s["lat0"]) * s["ky"]
+        ax.plot(rx[:k + 1], ry[:k + 1], color=PATTERN, lw=2.0, zorder=5.5, path_effects=_HALO, solid_capstyle="round")
+        if np.isfinite(rx[k]):
+            ax.scatter(rx[k], ry[k], s=50, color=PATTERN, edgecolor=SURFACE, linewidth=1.4, zorder=8.5)
     if final and s["n"] > 1 and not pattern:                            # net displacement, over the track
         ax.add_patch(FancyArrowPatch((s["tx"][0], s["ty"][0]), (s["tx"][-1], s["ty"][-1]), arrowstyle="-|>",
                                      mutation_scale=12, lw=1.4, ls=(0, (4, 3)), color=INK, zorder=7.5,
@@ -185,13 +215,15 @@ def _grab(fig) -> np.ndarray:
 def animate_storm_motion(storms, save_path, ncols: int = 2, half_width_km: float = 600.0,
                          half_height_km: float = 450.0, title: str = None, subtitle: str = None,
                          scale_km: float = 200.0, fps: float = 2.0, hold_frames: int = 7, dpi: int = 100,
-                         panel_width_in: float = 5.1, borders: bool = True) -> Path:
+                         panel_width_in: float = 5.1, borders: bool = True, frame_step: int = 1) -> Path:
     """GIF with one panel per storm at a common map scale: rain, storm core and the track of the rain mass, hour by
     hour; the last frame adds the net displacement. Returns the path of the GIF.
 
     storms          list of storm dicts (see the module docstring); storms with fewer hours stop at their last hour
     half_width_km,  half size of every panel (km), centred on the track of its storm
     half_height_km
+    frame_step      one frame every ``frame_step`` hours (the track drawn always has every hour); a value above 1
+                    keeps the file small for tracks of several days
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
@@ -202,7 +234,12 @@ def animate_storm_motion(storms, save_path, ncols: int = 2, half_width_km: float
     nrows = int(np.ceil(len(S) / ncols))
     pw, ph = panel_width_in, panel_width_in * half[1] / half[0]
     top, bottom, gap, vgap, side = (1.22 if title else 0.42), 0.78, 0.14, 0.42, 0.15
-    W, H = side * 2 + ncols * pw + (ncols - 1) * gap, top + bottom + nrows * ph + (nrows - 1) * vgap
+    W = side * 2 + ncols * pw + (ncols - 1) * gap
+    has_ref = any(s.get("ref_lon") is not None for s in S)
+    legend_rows = 2 if W < (9.6 if has_ref else 7.6) else 1               # a narrow figure: the key in two rows,
+    ref_row = 0.30 if (has_ref and legend_rows == 2) else 0.0             # and the reference track on its own line
+    bottom += 0.26 * (legend_rows - 1) + ref_row
+    H = top + bottom + nrows * ph + (nrows - 1) * vgap
     fig = Figure(figsize=(W, H), dpi=dpi, facecolor=SURFACE)
     FigureCanvasAgg(fig)
     axes = []
@@ -214,15 +251,24 @@ def animate_storm_motion(storms, save_path, ncols: int = 2, half_width_km: float
         fig.text(side / W, 1 - 0.36 / H, title, fontsize=16, fontweight="bold", color=INK, ha="left", va="center")
         if subtitle:
             fig.text(side / W, 1 - 0.70 / H, subtitle, fontsize=10.5, color=INK2, ha="left", va="center")
-    _colorbar(fig, [(W - side - 2.5) / W, 0.27 / H, 2.5 / W, 0.17 / H])
+    _colorbar(fig, [(W - side - 2.5) / W, (0.27 + ref_row) / H, 2.5 / W, 0.17 / H])
     handles = [Line2D([], [], color=MASS, lw=2.2, marker="o", ms=6, mec=SURFACE, label="Track of the rain mass"),
                Line2D([], [], color=INK2, lw=0.9, label="Storm core"),
                Line2D([], [], color=INK, lw=1.5, ls=(0, (4, 3)), label="Net displacement")]
-    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(side / W * 0.6, 0.20 / H), ncols=3, frameon=False,
-               fontsize=9.5, labelcolor=INK, handlelength=2.6, columnspacing=1.8)
+    style = dict(frameon=False, fontsize=9.5, labelcolor=INK, handlelength=2.6, columnspacing=1.8)
+    if has_ref:
+        ref_label = next((s["ref_label"] for s in S if s.get("ref_label")), "Independent track")
+        ref = Line2D([], [], color=PATTERN, lw=2.0, marker="o", ms=6, mec=SURFACE, label=ref_label)
+        if ref_row:
+            fig.legend(handles=[ref], loc="lower left", bbox_to_anchor=(side / W * 0.6, 0.03 / H), **style)
+        else:
+            handles.append(ref)
+    fig.legend(handles=handles, loc="lower left", bbox_to_anchor=(side / W * 0.6, (0.20 + ref_row) / H),
+               ncols=int(np.ceil(len(handles) / legend_rows)), **style)
     n = max(s["n"] for s in S)
     frames = []
-    for k in range(n):
+    shown = sorted(set(range(0, n, max(int(frame_step), 1))) | {n - 1})        # the last hour is always shown
+    for k in shown:
         for ax, s in zip(axes, S):
             _panel(ax, s, min(k, s["n"] - 1), final=(k == n - 1), half=half, scale_km=scale_km)
         frames.append(_grab(fig))
