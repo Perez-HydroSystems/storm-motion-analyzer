@@ -234,3 +234,58 @@ def test_variants_share_tile_result():
         assert "_labels" not in rows[v] and "_tile" not in rows[v]
     assert rows["v0"]["tile_direction_deg"] == rows["v2"]["tile_direction_deg"]
     assert rows["v1"]["jump_rule"] == "split" and rows["v2"]["tracker"] == "gated"
+
+
+# ------------------------------------------------------------------ analysed hours and core identification
+def _passing_storm(nt=22, n=330):
+    """A blob that crosses the tile in the first hours and grows stronger after it has left the tile."""
+    yy, xx = np.mgrid[0:n, 0:n]
+    rain = np.zeros((nt, n, n))
+    for t in range(nt):
+        cx = 60 + 11 * t
+        amp = 6.0 if cx < 190 else 14.0
+        rain[t] = amp * np.exp(-((yy - 165) ** 2 + (xx - cx) ** 2) / (2 * 14.0 ** 2))
+    lat = 35 + np.arange(n) / 30.0
+    lon = -100 + np.arange(n) / 30.0
+    times = np.datetime64("2010-06-01T01:00") + np.arange(nt) * np.timedelta64(1, "h")
+    fld = Field(rain, lat, lon, times)
+    r0, c0 = 90, 40                                    # tile: columns 40-189, the blob is inside it until hour 11
+    yy, xx = np.mgrid[0:21, 0:21]
+    circle = ((yy - 10) ** 2 + (xx - 10) ** 2 <= 100).astype(float)
+    ev = CatalogEvent("SYN.nc_storm_1_20100601.nc", 1, 1, times, lat[r0:r0 + 150], lon[c0:c0 + 150], 60, 65, circle)
+    return fld, ev, c0
+
+
+def test_analysis_hours_tile_keeps_the_hours_over_the_tile():
+    fld, ev, c0 = _passing_storm()
+    rows = {}
+    for rule in ("intensity", "tile"):
+        row, _ = analyze_event(ev, fld, EnlargedConfig(margin_deg=0, analysis_hours=rule), tile="SYN", with_tile=False)
+        assert row["retained"] and row["big_n_positions"] == 12 and row["analysis_hours"] == rule
+        rows[rule] = row
+    east_edge = fld.lon[c0 + 150]
+    in_tile = {k: int(np.sum(np.array(r["big_track_lon"]) < east_edge)) for k, r in rows.items()}
+    assert in_tile["tile"] > in_tile["intensity"]                  # the tile rule analyses the hours over the tile
+    assert rows["tile"]["big_start_time"] < rows["intensity"]["big_start_time"]
+    assert rows["tile"]["circle_share_window_pct"] > rows["intensity"]["circle_share_window_pct"]
+    assert rows["tile"]["big_track_positions"] == rows["intensity"]["big_track_positions"]   # the same whole track
+    assert rows["tile"]["track_in_tile"] and rows["tile"]["track_within_radius"]
+    with pytest.raises(ValueError):
+        analyze_event(ev, fld, EnlargedConfig(margin_deg=0, analysis_hours="other"), tile="SYN", with_tile=False)
+
+
+def test_core_threshold_separates_storms_joined_by_light_rain():
+    fld, ev, _ = _passing_storm()
+    rain = fld.rain.copy()
+    yy, xx = np.mgrid[0:rain.shape[1], 0:rain.shape[2]]
+    for t in range(rain.shape[0]):                                 # a second, stationary storm joined by light rain
+        rain[t] += 8.0 * np.exp(-((yy - 60) ** 2 + (xx - 60 - 11 * t) ** 2) / (2 * 14.0 ** 2))
+        rain[t, 60:166, 55 + 11 * t:66 + 11 * t] = np.maximum(rain[t, 60:166, 55 + 11 * t:66 + 11 * t], 0.8)
+    two = Field(rain, fld.lat, fld.lon, fld.times)
+    cfg = dict(margin_deg=0, tracker="robust:partition_keepsplit")
+    whole, _ = analyze_event(ev, two, EnlargedConfig(**cfg), tile="SYN", with_tile=False)
+    core, _ = analyze_event(ev, two, EnlargedConfig(**cfg, core_threshold_mmhr=2.0), tile="SYN", with_tile=False)
+    assert whole["retained"] and core["retained"] and core["core_threshold_mmhr"] == 2.0
+    assert core["big_storm_area_km2"] < 0.7 * whole["big_storm_area_km2"]      # the storm is one of the two bodies
+    with pytest.raises(ValueError):                                # cores need a robust:<preset> tracker
+        analyze_event(ev, two, EnlargedConfig(margin_deg=0, core_threshold_mmhr=2.0), tile="SYN", with_tile=False)

@@ -64,7 +64,8 @@ def cmd_enlarged(args) -> int:
 
     cfg = EnlargedConfig(margin_deg=args.margin, selection=args.selection,
                          tracker=f"robust:{args.linking}" if args.linking else "v6",
-                         linger_class=args.classes, pattern=args.pattern)
+                         linger_class=args.classes, pattern=args.pattern, analysis_hours=args.analysis_hours,
+                         core_threshold_mmhr=args.core_threshold, conditions=args.conditions)
     rows, fps = run_catalog(args.catalog_dir, args.aorc_dir, cfg, tile=args.tile, workers=args.workers,
                             with_tile=not args.no_tile)
     out = Path(args.out)
@@ -130,6 +131,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tile", action="store_true", help="Skip the tile-only V6 comparison.")
     p.add_argument("--linking", help="Preset of tracking.robust for the linking, e.g. partition_keepsplit "
                                      "(default: the standard linking).")
+    p.add_argument("--analysis-hours", default="intensity", choices=("intensity", "tile"),
+                   help="Analysed hours: those of largest storm intensity (default), or those with most rain of the "
+                        "storm over the tile.")
+    p.add_argument("--core-threshold", type=float,
+                   help="With --linking: identify the storms from cores of this rain rate (mm/h), grown into the rain area.")
+    p.add_argument("--conditions", action="store_true",
+                   help="Add the conditions of each track: window edge, two distant pieces, absorbed rain area.")
     p.add_argument("--classes", action="store_true",
                    help="Add the class of each storm: coherent, stall, turn or meander.")
     p.add_argument("--pattern", action="store_true",

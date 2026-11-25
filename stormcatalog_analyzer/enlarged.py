@@ -62,7 +62,7 @@ from pyproj import Geod, Transformer
 from scipy import ndimage
 
 from .config import CoherenceConfig
-from .motion.direction import bearing_to_math
+from .motion.direction import bearing_to_math, select_analysis_window
 from .pipeline import compute_storm_trajectory
 from .tracking.dataset import storm_tracking_features
 from .tracking.identification import storm_area_identification
@@ -100,6 +100,12 @@ class EnlargedConfig:
     linger_class: bool = False              # add the travel / stall / turn / meander class (motion.linger)
     pattern: bool = False                   # add the rain-pattern and propagation velocities (motion.pattern)
     pattern_cross_check: bool = True        # ... with the two optical-flow cross-checks (pattern_robust)
+    conditions: bool = False                # add the conditions of the track (conditions.py): window edge, two
+    #                                         distant pieces, absorbed rain area, scattered core
+    analysis_hours: str = "intensity"       # analysed window: "intensity" (the hours of largest storm intensity) |
+    #                                         "tile" (the hours with most rain of the storm over the tile)
+    core_threshold_mmhr: Optional[float] = None   # "robust:<preset>" trackers: identify the storms from cores of
+    #                                               this rain rate, grown into the rain area (None: all rain area)
     coherence: CoherenceConfig = field(default_factory=CoherenceConfig)
 
     def to_dict(self) -> dict:
@@ -369,12 +375,22 @@ def register_tracker(name: str, fn) -> None:
     TRACKERS[name] = fn
 
 
+def tracker_key(cfg: EnlargedConfig) -> str:
+    """Name of the tracker of a configuration: the tracker, with the core threshold when one is set."""
+    if cfg.core_threshold_mmhr is None:
+        return cfg.tracker
+    if not cfg.tracker.startswith("robust:"):
+        raise ValueError("core_threshold_mmhr needs a 'robust:<preset>' tracker")
+    return f"{cfg.tracker}@core{cfg.core_threshold_mmhr:g}"
+
+
 def track_field(rain0: np.ndarray, cfg: EnlargedConfig, lat=None, lon=None) -> np.ndarray:
     """Track a (nt, ny, nx) field (no NaN) with the configured tracker; returns int track ids (0 = none)."""
-    if cfg.tracker not in TRACKERS and cfg.tracker.startswith("robust:"):
+    key = tracker_key(cfg)
+    if key not in TRACKERS and cfg.tracker.startswith("robust:"):
         from .tracking import robust                            # a preset of tracking.robust, built on first use
-        TRACKERS[cfg.tracker] = robust.enlarged_tracker(cfg.tracker.split(":", 1)[1])
-    return TRACKERS[cfg.tracker](rain0, lat, lon, cfg)
+        TRACKERS[key] = robust.enlarged_tracker(cfg.tracker.split(":", 1)[1], core_threshold=cfg.core_threshold_mmhr)
+    return TRACKERS[key](rain0, lat, lon, cfg)
 
 
 def jump_segments(lon, lat, cfg: EnlargedConfig) -> list:
@@ -588,6 +604,7 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
     if labels is None:                     # labels of the same field and tracker may be passed in (variant reuse)
         labels = track_field(rain0, cfg, fld.lat, fld.lon)
     row["tracker"], row["jump_rule"] = cfg.tracker, cfg.jump_rule
+    row["analysis_hours"], row["core_threshold_mmhr"] = cfg.analysis_hours, cfg.core_threshold_mmhr
     tab = track_table(labels, rain0, area, circ, fld.lat, fld.lon)
     circle_total = float(sum((rain0[t] * area * circ).sum() for t in range(rain0.shape[0])))
     row["circle_volume_total"] = circle_total
@@ -621,7 +638,16 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
             elif cfg.jump_rule not in ("none", "split"):
                 raise ValueError(cfg.jump_rule)
         if n_big >= cfg.min_duration_hr and len(hours):
-            d = v6_descriptors(rain0, labels, k, hours, fld.lat, fld.lon, fld.times, seed_key, cfg)
+            win = hours
+            if cfg.analysis_hours == "tile":                       # the hours with most rain of the storm over the tile
+                vol_tile = [float((rain0[t] * area)[(labels[t] == k) & inside].sum()) for t in hours]
+                a, b = select_analysis_window(vol_tile, max_positions=cfg.window_hr)
+                win = hours[a:b]
+            elif cfg.analysis_hours != "intensity":
+                raise ValueError(cfg.analysis_hours)
+            d = v6_descriptors(rain0, labels, k, win, fld.lat, fld.lon, fld.times, seed_key, cfg)
+            if d is not None and cfg.analysis_hours == "tile":     # positions of the whole track, as for "intensity"
+                d["track_positions"], d["window_start"] = int(len(hours)), int(win[0] - hours[0])
             for _ in range(3):   # v1: the analysed window must itself be jump-free (jumps judged on the window)
                 if cfg.jump_rule != "split" or d is None or d["n_jumps"] == 0:
                     break
@@ -638,6 +664,14 @@ def analyze_event(ev: CatalogEvent, fld: Field, cfg: EnlargedConfig, tile: str =
                 row["retained"] = True
                 row.update({f"big_{c}": v for c, v in d.items()})
                 row.update(_flags(rain0, valid, labels, k, wh, inside, area, cfg))
+                row.update(_relevance(tk, wh, d, (w, s, e, n), (clon, clat), circle_total))
+                if cfg.conditions:
+                    from .conditions import track_conditions
+                    tol = 0.2                                      # an edge of the window is the margin, or the data extent
+                    edges = dict(W=abs(fld.lon[0] - (w - cfg.margin_deg)) < tol, E=abs(fld.lon[-1] - (e + cfg.margin_deg)) < tol,
+                                 S=abs(fld.lat[0] - (s - cfg.margin_deg)) < tol, N=abs(fld.lat[-1] - (n + cfg.margin_deg)) < tol)
+                    cond = track_conditions(rain0[wh], np.array([labels[t] == k for t in wh]), fld.lat, fld.lon, edges)
+                    row.update({(c if c.startswith("flag_") or c == "track_condition" else f"cond_{c}"): v for c, v in cond.items()})
                 row["volume_track_mm_km2"] = float(tk[tk["t"].isin(hours)]["volume"].sum())
                 if cfg.linger_class:
                     from .motion.linger import classify_track
@@ -686,6 +720,20 @@ def _pattern(rain0, labels, k, wh, tk, fld: Field, seed, cfg: EnlargedConfig) ->
     out.update(pattern_step_u=steps["u"].tolist(), pattern_step_v=steps["v"].tolist(),
                pattern_step_corr=steps["corr"].tolist(), pattern_step_accepted=steps["accepted"].tolist())
     return out
+
+
+def _relevance(tk, wh, d, bounds, circle, circle_total) -> dict:
+    """How the analysed track relates to the tile and to the screening location: the share of the event rain at
+    the screening circle that falls in the analysed hours, the smallest distance from the track to the centre of the
+    circle, the equivalent radius of the mean storm area, and whether a position of the track lies inside the tile."""
+    w, s, e, n = bounds
+    lon, lat = np.asarray(d["track_lon"], float), np.asarray(d["track_lat"], float)
+    dist = np.atleast_1d(_GEOD.inv(lon, lat, np.full(lon.size, circle[0]), np.full(lat.size, circle[1]))[2]) / 1000.0
+    radius = float(np.sqrt(d["storm_area_km2"] / np.pi))
+    share = 100 * float(tk[tk["t"].isin(np.asarray(wh).tolist())]["circle_volume"].sum()) / max(circle_total, 1e-9)
+    return {"circle_share_window_pct": share, "track_circle_min_km": float(dist.min()), "storm_radius_km": radius,
+            "track_within_radius": bool(dist.min() <= radius),
+            "track_in_tile": bool(((lon >= w) & (lon <= e) & (lat >= s) & (lat <= n)).any())}
 
 
 def _flags(rain0, valid, labels, k, wh, inside, area, cfg) -> dict:
@@ -820,9 +868,9 @@ def analyze_catalog_file_variants(path, aorc_dir, cfgs: dict, tile: str = "") ->
     fld = read_aorc_field(aorc_dir, ev.times, *tile_bounds_with_margin(ev, margins.pop()))
     out, cache, tres = {}, {}, None
     for name, cfg in cfgs.items():
-        row, fps = analyze_event(ev, fld, cfg, tile=tile, labels=cache.get(cfg.tracker), tile_result=tres,
+        row, fps = analyze_event(ev, fld, cfg, tile=tile, labels=cache.get(tracker_key(cfg)), tile_result=tres,
                                  keep_private=True)
-        cache[cfg.tracker] = row.pop("_labels")
+        cache[tracker_key(cfg)] = row.pop("_labels")
         tres = row.pop("_tile", None)      # the tile-only V6 result is computed once and shared
         row["variant"] = name
         out[name] = (row, fps)
